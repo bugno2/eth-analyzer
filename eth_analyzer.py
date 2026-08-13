@@ -197,6 +197,7 @@ def generate_report():
     pos_section = "\n".join(pos_lines)
 
     report = f"""
+
 📊 ETH-AI 全视角分析
 📅 {now} (北京时间)
 💰 ETH实时价格: {d['price']}
@@ -237,6 +238,7 @@ ETH价格: {d['price']}
 def generate_fallback_report(now, price_display):
     """备用报告（百度API不可用时）"""
     return f"""
+
 📊 ETH-AI 全视角分析 (备用数据)
 📅 {now} (北京时间)
 💰 ETH实时价格: {price_display}
