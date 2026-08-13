@@ -29,7 +29,7 @@ def get_baidu_access_token():
         resp = requests.post(url, params=params, timeout=10)
         if resp.status_code == 200:
             token = resp.json().get("access_token")
-            print(f"✅ 获取百度Token成功")
+            print("✅ 获取百度Token成功")
             return token
         else:
             print(f"❌ 获取百度Token失败: {resp.text}")
@@ -213,7 +213,7 @@ def generate_fallback_report(now):
 | 🟢 支撑 | 1875 / 1860 | 破位看1845 |
 | 🟢 铁底 | 1845 | 多空分界线 |
 
-⚠️ *分析仅供参考*
+⚠️ *分析仅供参考，投资决策需自行判断，盈亏自负。*
 """
 
 def send_to_feishu(content):
