@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# eth_analyzer.py - ETH情感分析 + 飞书推送 (集成百度NLP + 实时价格)
+# eth_analyzer.py - ETH情感分析 + 飞书推送 (集成百度NLP + 实时价格 + 北京时间)
 
 import requests
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # ========== 从环境变量读取密钥 ==========
 FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK")
@@ -13,26 +13,45 @@ BAIDU_API_KEY = os.environ.get("BAIDU_API_KEY")
 BAIDU_SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY")
 # =========================================
 
+# ========== 临时测试（如果环境变量读不到，在这里直接填）==========
+# 如果上面的环境变量读不到，取消下面三行的注释，填上你的真实值
+# FEISHU_WEBHOOK = "你的飞书Webhook"
+# BAIDU_API_KEY = "你的百度API Key"
+# BAIDU_SECRET_KEY = "你的百度Secret Key"
+# ================================================================
+
+# ========== 北京时间时区 ==========
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+def get_beijing_time():
+    """获取当前北京时间字符串"""
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
 def get_eth_price():
     """从币安API获取ETH/USDT实时价格"""
     try:
+        print("⏳ 正在获取ETH实时价格...")
         url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, timeout=10)
+        print(f"📡 币安API响应状态码: {resp.status_code}")
         if resp.status_code == 200:
             price = float(resp.json().get("price", 0))
             print(f"✅ ETH实时价格: ${price}")
             return price
         else:
-            print(f"⚠️ 获取ETH价格失败: {resp.status_code}")
+            print(f"❌ 获取ETH价格失败，状态码: {resp.status_code}")
             return None
     except Exception as e:
-        print(f"⚠️ 获取ETH价格异常: {e}")
+        print(f"❌ 获取ETH价格异常: {e}")
         return None
 
 def get_baidu_access_token():
     """获取百度API的Access Token"""
+    print(f"🔑 BAIDU_API_KEY: {'已设置' if BAIDU_API_KEY else '未设置'}")
+    print(f"🔑 BAIDU_SECRET_KEY: {'已设置' if BAIDU_SECRET_KEY else '未设置'}")
+
     if not BAIDU_API_KEY or not BAIDU_SECRET_KEY:
-        print("⚠️ 未设置百度API Key或Secret Key")
+        print("❌ 百度API Key或Secret Key未设置！请检查环境变量。")
         return None
 
     url = "https://aip.baidubce.com/oauth/2.0/token"
@@ -42,13 +61,20 @@ def get_baidu_access_token():
         "client_secret": BAIDU_SECRET_KEY
     }
     try:
+        print("⏳ 正在获取百度Token...")
         resp = requests.post(url, params=params, timeout=10)
+        print(f"📡 百度Token响应状态码: {resp.status_code}")
         if resp.status_code == 200:
             token = resp.json().get("access_token")
-            print("✅ 获取百度Token成功")
-            return token
+            if token:
+                print("✅ 获取百度Token成功！")
+                return token
+            else:
+                print("❌ 百度Token响应中未找到access_token字段")
+                return None
         else:
-            print(f"❌ 获取百度Token失败: {resp.text}")
+            print(f"❌ 获取百度Token失败，状态码: {resp.status_code}")
+            print(f"❌ 响应内容: {resp.text}")
             return None
     except Exception as e:
         print(f"❌ 请求百度Token异常: {e}")
@@ -95,16 +121,17 @@ def fetch_eth_news():
 
 def generate_report():
     """综合分析并生成报告"""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+    now = get_beijing_time()
+    print(f"🚀 开始分析，北京时间: {now}")
+
     # 1. 获取ETH实时价格
     eth_price = get_eth_price()
-    price_display = f"${eth_price:.2f}" if eth_price else "获取失败"
+    price_display = f"${eth_price:.2f}" if eth_price else "❌ 获取失败"
 
     # 2. 获取百度Token并分析
     token = get_baidu_access_token()
     if not token:
-        print("❌ 无法获取百度Token，使用固定数据")
+        print("❌ 无法获取百度Token，使用备用数据")
         return generate_fallback_report(now, price_display)
 
     news_list = fetch_eth_news()
@@ -116,7 +143,7 @@ def generate_report():
             print(f"📊 分析: {news[:20]}... → {result['sentiment']}")
 
     if not analysis_results:
-        print("⚠️ 没有分析结果，使用固定数据")
+        print("⚠️ 没有分析结果，使用备用数据")
         return generate_fallback_report(now, price_display)
 
     total = len(analysis_results)
@@ -166,7 +193,7 @@ def generate_report():
 
     report = f"""
 # 📊 ETH AI 全视角分析
-**📅 {now} (UTC+8)**
+**📅 {now} (北京时间)**
 **💰 ETH实时价格: {d['price']}**
 
 ---
@@ -217,7 +244,7 @@ def generate_fallback_report(now, price_display):
     """备用报告（百度API不可用时）"""
     return f"""
 # 📊 ETH AI 全视角分析 (备用数据)
-**📅 {now} (UTC+8)**
+**📅 {now} (北京时间)**
 **💰 ETH实时价格: {price_display}**
 
 ⚠️ **当前无法获取百度NLP实时分析数据**
@@ -245,17 +272,17 @@ def send_to_feishu(content):
     try:
         resp = requests.post(FEISHU_WEBHOOK, headers=headers, json=payload, timeout=10)
         if resp.status_code == 200:
-            print(f"[{datetime.now()}] ✅ 飞书推送成功")
+            print(f"[{get_beijing_time()}] ✅ 飞书推送成功")
         else:
-            print(f"[{datetime.now()}] ❌ 推送失败: {resp.text}")
+            print(f"[{get_beijing_time()}] ❌ 推送失败: {resp.text}")
     except Exception as e:
-        print(f"[{datetime.now()}] ❌ 请求异常: {e}")
+        print(f"[{get_beijing_time()}] ❌ 请求异常: {e}")
 
 def main():
-    print(f"[{datetime.now()}] 🚀 开始分析ETH情绪...")
+    print(f"[{get_beijing_time()}] 🚀 开始分析ETH情绪...")
     report = generate_report()
     send_to_feishu(report)
-    print(f"[{datetime.now()}] ✅ 分析完成")
+    print(f"[{get_beijing_time()}] ✅ 分析完成")
 
 if __name__ == "__main__":
     main()
