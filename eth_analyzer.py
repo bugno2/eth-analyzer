@@ -9,12 +9,11 @@ from datetime import datetime
 
 # ========== 从环境变量读取密钥 ==========
 FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK")
+# 如果本地测试，可以直接设置：
+# FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/你的密钥"
 # =======================================
 
-# 如果没设置环境变量，可以用占位符测试
-if not FEISHU_WEBHOOK:
-    FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/你的密钥"
-
+# ========== 固定数据 ==========
 REPORT_DATA = {
     "sentiment": "偏空",
     "negative": "62%",
@@ -42,8 +41,10 @@ REPORT_DATA = {
         {"trigger": "📈 站稳1915超15分钟", "action": "止损走人，不补", "logic": "空头失败"}
     ]
 }
+# ===================================
 
 def generate_report():
+    """生成报告"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     d = REPORT_DATA
     trade_rows = "\n".join([f"| {t['type']} | {t['entry']} | {t['stop']} | {t['tp']} | {t['rr']} | {t['size']} | {t['risk']} |" for t in d["trades"]])
@@ -95,8 +96,9 @@ def generate_report():
 """
 
 def send_to_feishu(content):
-    if not FEISHU_WEBHOOK or FEISHU_WEBHOOK == "https://open.feishu.cn/open-apis/bot/v2/hook/你的密钥":
-        print("⚠️ 请先设置飞书Webhook地址")
+    """推送至飞书"""
+    if not FEISHU_WEBHOOK:
+        print("⚠️ 未设置 FEISHU_WEBHOOK 环境变量")
         return
     headers = {"Content-Type": "application/json"}
     payload = {"msg_type": "text", "content": {"text": content}}
@@ -110,6 +112,7 @@ def send_to_feishu(content):
         print(f"[{datetime.now()}] ❌ 请求异常: {e}")
 
 def main():
+    """主函数"""
     print(f"[{datetime.now()}] 🚀 开始分析ETH情绪...")
     report = generate_report()
     send_to_feishu(report)
