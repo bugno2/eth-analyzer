@@ -184,7 +184,7 @@ def generate_report():
         ]
     }
 
-    # 构建交易计划
+    # 构建交易计划（紧凑无空行）
     trade_lines = []
     for t in d["trades"]:
         trade_lines.append(f"策略：{t['type']}\n入场：{t['entry']} | 止损：{t['stop']}\n止盈：{t['tp']} | 盈亏比：{t['rr']} | 仓位：{t['size']} | 风险：{t['risk']}")
