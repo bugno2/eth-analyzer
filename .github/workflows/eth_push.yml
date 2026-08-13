@@ -18,4 +18,4 @@ jobs:
       - name: 运行ETH分析脚本
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-        run: python eth_analyzer.py
+        run: python "env python3.py/eth_analyzer.py"
