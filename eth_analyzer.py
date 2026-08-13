@@ -13,13 +13,6 @@ BAIDU_API_KEY = os.environ.get("BAIDU_API_KEY")
 BAIDU_SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY")
 # =========================================
 
-# ========== 临时测试（如果环境变量读不到，在这里直接填）==========
-# 如果上面的环境变量读不到，取消下面三行的注释，填上你的真实值
-# FEISHU_WEBHOOK = "你的飞书Webhook"
-# BAIDU_API_KEY = "你的百度API Key"
-# BAIDU_SECRET_KEY = "你的百度Secret Key"
-# ================================================================
-
 # ========== 北京时间时区 ==========
 BEIJING_TZ = timezone(timedelta(hours=8))
 
@@ -28,22 +21,22 @@ def get_beijing_time():
     return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 def get_eth_price():
-    """从币安API获取ETH/USDT实时价格"""
-    try:
-        print("⏳ 正在获取ETH实时价格...")
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
-        resp = requests.get(url, timeout=10)
-        print(f"📡 币安API响应状态码: {resp.status_code}")
-        if resp.status_code == 200:
-            price = float(resp.json().get("price", 0))
-            print(f"✅ ETH实时价格: ${price}")
-            return price
-        else:
-            print(f"❌ 获取ETH价格失败，状态码: {resp.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ 获取ETH价格异常: {e}")
-        return None
+    """从币安API获取ETH/USDT实时价格（带重试）"""
+    url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
+    for i in range(3):
+        try:
+            print(f"⏳ 正在获取ETH实时价格... (第{i+1}次尝试)")
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                price = float(resp.json().get("price", 0))
+                print(f"✅ ETH实时价格: ${price}")
+                return price
+            else:
+                print(f"⚠️ 第{i+1}次尝试失败，状态码: {resp.status_code}")
+        except Exception as e:
+            print(f"⚠️ 第{i+1}次尝试异常: {e}")
+    print("❌ ETH价格获取失败，已重试3次")
+    return None
 
 def get_baidu_access_token():
     """获取百度API的Access Token"""
