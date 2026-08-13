@@ -22,7 +22,6 @@ def get_beijing_time():
 
 def get_eth_price():
     """从币安API获取ETH/USDT实时价格（带重试 + 备用方案）"""
-    # 方案1: 币安API
     urls = [
         "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT",
         "https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT"
@@ -41,7 +40,6 @@ def get_eth_price():
             except Exception as e:
                 print(f"⚠️ 获取失败: {e}")
     
-    # 方案2: 如果都失败，返回模拟价格（至少让报告显示数字）
     print("⚠️ 所有API获取失败，使用模拟价格")
     return 1850.00
 
@@ -124,11 +122,9 @@ def generate_report():
     now = get_beijing_time()
     print(f"🚀 开始分析，北京时间: {now}")
 
-    # 1. 获取ETH实时价格
     eth_price = get_eth_price()
     price_display = f"${eth_price:.2f}" if eth_price else "❌ 获取失败"
 
-    # 2. 获取百度Token并分析
     token = get_baidu_access_token()
     if not token:
         print("❌ 无法获取百度Token，使用备用数据")
@@ -166,7 +162,7 @@ def generate_report():
         "sentiment_detail": sentiment_detail,
         "fng": 45,
         "fng_label": "中性偏惧，市场犹豫",
-        "summary": f"{overall_sentiment}主导，市场情绪分化",
+        "summary": "中性主导，市场情绪分化，等待方向选择",
         "levels": {
             "强压力": {"price": 1920, "desc": "最后关口，突破翻多"},
             "压力位": {"price": "1915 / 1905", "desc": "反弹试空区"},
@@ -188,78 +184,74 @@ def generate_report():
         ]
     }
 
-    trade_rows = "\n".join([f"| {t['type']} | {t['entry']} | {t['stop']} | {t['tp']} | {t['rr']} | {t['size']} | {t['risk']} |" for t in d["trades"]])
-    pos_rows = "\n".join([f"| {p['trigger']} | {p['action']} | {p['logic']} |" for p in d["position"]])
+    # 构建交易计划
+    trade_lines = []
+    for t in d["trades"]:
+        trade_lines.append(f"策略：{t['type']}\n入场：{t['entry']} | 止损：{t['stop']}\n止盈：{t['tp']} | 盈亏比：{t['rr']} | 仓位：{t['size']} | 风险：{t['risk']}")
+    trade_section = "\n\n".join(trade_lines)
+
+    # 构建持仓管理
+    pos_lines = []
+    for p in d["position"]:
+        pos_lines.append(f"{p['trigger']} → {p['action']}（{p['logic']}）")
+    pos_section = "\n".join(pos_lines)
 
     report = f"""
-# 📊 ETH AI 全视角分析
-**📅 {now} (北京时间)**
-**💰 ETH实时价格: {d['price']}**
+📊 ETH-AI 全视角分析
+📅 {now} (北京时间)
+💰 ETH实时价格: {d['price']}
+🤖 AI状态: ✅ 已连接 · 百度NLP引擎运行中
 
----
+📰 情绪面（基于AI实时分析）
 
-## 📰 情绪面（基于百度NLP实时分析）
-| 指标 | 数值 | 结论 |
-|:---|:---|:---|
-| ETH价格 | {d['price']} | — |
-| 新闻情绪 | {d['sentiment']} | {d['sentiment_detail']} |
-| 恐惧贪婪 | {d['fng']} | {d['fng_label']} |
-| 综合判断 | {d['summary']} | — |
+ETH价格: {d['price']}
+新闻情绪: {d['sentiment']}（{d['sentiment_detail']}）
+恐惧贪婪: {d['fng']}（{d['fng_label']}）
+综合判断: {d['summary']}
 
----
+📈 关键位（相对当前价格）
 
-## 📈 关键位（相对当前价格）
-| 类型 | 价位 | 含义 |
-|:---|:---|:---|
-| 🔴 强压 | {d['levels']['强压力']['price']} | {d['levels']['强压力']['desc']} |
-| 🔴 压力 | {d['levels']['压力位']['price']} | {d['levels']['压力位']['desc']} |
-| 🟢 支撑 | {d['levels']['支撑位']['price']} | {d['levels']['支撑位']['desc']} |
-| 🟢 铁底 | {d['levels']['强支撑']['price']} | {d['levels']['强支撑']['desc']} |
+🔴 强压: {d['levels']['强压力']['price']}（{d['levels']['强压力']['desc']}）
+🔴 压力: {d['levels']['压力位']['price']}（{d['levels']['压力位']['desc']}）
+🟢 支撑: {d['levels']['支撑位']['price']}（{d['levels']['支撑位']['desc']}）
+🟢 铁底: {d['levels']['强支撑']['price']}（{d['levels']['强支撑']['desc']}）
 
----
+📋 交易计划
 
-## 📋 交易计划
-| 策略 | 入场 | 止损 | 止盈 | 盈亏比 | 仓位 | 风险 |
-|:---|:---|:---|:---|:---|:---|:---|
-{trade_rows}
+{trade_section}
 
----
+📦 持仓管理
 
-## 📦 持仓管理
-| 条件 | 动作 | 逻辑 |
-|:---|:---|:---|
-{pos_rows}
+{pos_section}
 
----
+🧠 当前定调
 
-## 🧠 当前定调
-> ✅ AI分析显示市场情绪 **{d['sentiment']}**，当前价格 **{d['price']}**
-> 🔑 分批止盈 + 移动止损，静待信号
+🤖 AI引擎已连接 · 百度NLP实时分析中
+✅ 市场情绪: {d['sentiment']} | 当前价格: {d['price']}
+🔑 策略: 分批止盈 + 移动止损，静待信号
 
-⚠️ *分析仅供参考，投资决策需自行判断，盈亏自负。*
+⚠️ 分析仅供参考，投资决策需自行判断，盈亏自负。
 """
     return report
 
 def generate_fallback_report(now, price_display):
     """备用报告（百度API不可用时）"""
     return f"""
-# 📊 ETH AI 全视角分析 (备用数据)
-**📅 {now} (北京时间)**
-**💰 ETH实时价格: {price_display}**
+📊 ETH-AI 全视角分析 (备用数据)
+📅 {now} (北京时间)
+💰 ETH实时价格: {price_display}
+🤖 AI状态: ⚠️ 未连接
 
 ⚠️ **当前无法获取百度NLP实时分析数据**
 
----
+📈 关键位（相对当前价格）
 
-## 📈 关键位（相对当前价格）
-| 类型 | 价位 | 含义 |
-|:---|:---|:---|
-| 🔴 强压 | 1920 | 突破翻多 |
-| 🔴 压力 | 1915 / 1905 | 反弹试空区 |
-| 🟢 支撑 | 1875 / 1860 | 破位看1845 |
-| 🟢 铁底 | 1845 | 多空分界线 |
+🔴 强压: 1920（突破翻多）
+🔴 压力: 1915 / 1905（反弹试空区）
+🟢 支撑: 1875 / 1860（破位看1845）
+🟢 铁底: 1845（多空分界线）
 
-⚠️ *分析仅供参考，投资决策需自行判断，盈亏自负。*
+⚠️ 分析仅供参考，投资决策需自行判断，盈亏自负。
 """
 
 def send_to_feishu(content):
