@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# eth_analyzer.py - ETH情感分析 + 飞书推送 (集成百度NLP)
+# eth_analyzer.py - ETH情感分析 + 飞书推送 (集成百度NLP + 实时价格)
 
 import requests
 import json
@@ -12,6 +12,22 @@ FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK")
 BAIDU_API_KEY = os.environ.get("BAIDU_API_KEY")
 BAIDU_SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY")
 # =========================================
+
+def get_eth_price():
+    """从币安API获取ETH/USDT实时价格"""
+    try:
+        url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            price = float(resp.json().get("price", 0))
+            print(f"✅ ETH实时价格: ${price}")
+            return price
+        else:
+            print(f"⚠️ 获取ETH价格失败: {resp.status_code}")
+            return None
+    except Exception as e:
+        print(f"⚠️ 获取ETH价格异常: {e}")
+        return None
 
 def get_baidu_access_token():
     """获取百度API的Access Token"""
@@ -70,7 +86,6 @@ def analyze_sentiment(text, token):
 
 def fetch_eth_news():
     """获取ETH相关新闻（可替换为真实数据源）"""
-    # 示例数据，后续可替换为RSS或API抓取
     return [
         "ETH价格跌破1900美元，市场恐慌情绪蔓延",
         "机构投资者持续增持以太坊ETF，看好长期价值",
@@ -80,15 +95,18 @@ def fetch_eth_news():
 
 def generate_report():
     """综合分析并生成报告"""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 1. 获取ETH实时价格
+    eth_price = get_eth_price()
+    price_display = f"${eth_price:.2f}" if eth_price else "获取失败"
 
-    # 1. 获取百度Token
+    # 2. 获取百度Token并分析
     token = get_baidu_access_token()
     if not token:
         print("❌ 无法获取百度Token，使用固定数据")
-        return generate_fallback_report(now)
+        return generate_fallback_report(now, price_display)
 
-    # 2. 抓取新闻并逐个分析
     news_list = fetch_eth_news()
     analysis_results = []
     for news in news_list:
@@ -97,10 +115,9 @@ def generate_report():
             analysis_results.append(result)
             print(f"📊 分析: {news[:20]}... → {result['sentiment']}")
 
-    # 3. 汇总统计
     if not analysis_results:
         print("⚠️ 没有分析结果，使用固定数据")
-        return generate_fallback_report(now)
+        return generate_fallback_report(now, price_display)
 
     total = len(analysis_results)
     positive_count = sum(1 for r in analysis_results if r["sentiment"] == "正面")
@@ -116,8 +133,8 @@ def generate_report():
         overall_sentiment = "中性"
         sentiment_detail = f"正面{int(positive_count/total*100)}% / 负面{int(negative_count/total*100)}%"
 
-    # 4. 固定数据（后续可动态化）
     d = {
+        "price": price_display,
         "sentiment": overall_sentiment,
         "sentiment_detail": sentiment_detail,
         "fng": 45,
@@ -144,26 +161,27 @@ def generate_report():
         ]
     }
 
-    # 5. 组装报告
     trade_rows = "\n".join([f"| {t['type']} | {t['entry']} | {t['stop']} | {t['tp']} | {t['rr']} | {t['size']} | {t['risk']} |" for t in d["trades"]])
     pos_rows = "\n".join([f"| {p['trigger']} | {p['action']} | {p['logic']} |" for p in d["position"]])
 
     report = f"""
 # 📊 ETH AI 全视角分析
 **📅 {now} (UTC+8)**
+**💰 ETH实时价格: {d['price']}**
 
 ---
 
 ## 📰 情绪面（基于百度NLP实时分析）
 | 指标 | 数值 | 结论 |
 |:---|:---|:---|
+| ETH价格 | {d['price']} | — |
 | 新闻情绪 | {d['sentiment']} | {d['sentiment_detail']} |
 | 恐惧贪婪 | {d['fng']} | {d['fng_label']} |
 | 综合判断 | {d['summary']} | — |
 
 ---
 
-## 📈 关键位
+## 📈 关键位（相对当前价格）
 | 类型 | 价位 | 含义 |
 |:---|:---|:---|
 | 🔴 强压 | {d['levels']['强压力']['price']} | {d['levels']['强压力']['desc']} |
@@ -188,24 +206,25 @@ def generate_report():
 ---
 
 ## 🧠 当前定调
-> ✅ AI分析显示市场情绪 **{d['sentiment']}**，结合技术位谨慎操作
+> ✅ AI分析显示市场情绪 **{d['sentiment']}**，当前价格 **{d['price']}**
 > 🔑 分批止盈 + 移动止损，静待信号
 
 ⚠️ *分析仅供参考，投资决策需自行判断，盈亏自负。*
 """
     return report
 
-def generate_fallback_report(now):
+def generate_fallback_report(now, price_display):
     """备用报告（百度API不可用时）"""
     return f"""
 # 📊 ETH AI 全视角分析 (备用数据)
 **📅 {now} (UTC+8)**
+**💰 ETH实时价格: {price_display}**
 
 ⚠️ **当前无法获取百度NLP实时分析数据**
 
 ---
 
-## 📈 关键位
+## 📈 关键位（相对当前价格）
 | 类型 | 价位 | 含义 |
 |:---|:---|:---|
 | 🔴 强压 | 1920 | 突破翻多 |
