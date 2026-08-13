@@ -197,36 +197,30 @@ def generate_report():
     pos_section = "\n".join(pos_lines)
 
     report = f"""
-
 📊 ETH-AI 全视角分析
 📅 {now} (北京时间)
 💰 ETH实时价格: {d['price']}
 🤖 AI状态: ✅ 已连接 · AI引擎运行中
 
 📰 情绪面（基于AI实时分析）
-
 ETH价格: {d['price']}
 新闻情绪: {d['sentiment']}（{d['sentiment_detail']}）
 恐惧贪婪: {d['fng']}（{d['fng_label']}）
 综合判断: {d['summary']}
 
 📈 关键位（相对当前价格）
-
 🔴 强压: {d['levels']['强压力']['price']}（{d['levels']['强压力']['desc']}）
 🔴 压力: {d['levels']['压力位']['price']}（{d['levels']['压力位']['desc']}）
 🟢 支撑: {d['levels']['支撑位']['price']}（{d['levels']['支撑位']['desc']}）
 🟢 铁底: {d['levels']['强支撑']['price']}（{d['levels']['强支撑']['desc']}）
 
 📋 交易计划
-
 {trade_section}
 
 📦 持仓管理
-
 {pos_section}
 
 🧠 当前定调
-
 🤖 AI引擎已连接 · AI实时分析中
 ✅ 市场情绪: {d['sentiment']} | 当前价格: {d['price']}
 🔑 策略: 分批止盈 + 移动止损，静待信号
@@ -238,7 +232,6 @@ ETH价格: {d['price']}
 def generate_fallback_report(now, price_display):
     """备用报告（百度API不可用时）"""
     return f"""
-
 📊 ETH-AI 全视角分析 (备用数据)
 📅 {now} (北京时间)
 💰 ETH实时价格: {price_display}
@@ -247,7 +240,6 @@ def generate_fallback_report(now, price_display):
 ⚠️ **当前无法获取百度NLP实时分析数据**
 
 📈 关键位（相对当前价格）
-
 🔴 强压: 1920（突破翻多）
 🔴 压力: 1915 / 1905（反弹试空区）
 🟢 支撑: 1875 / 1860（破位看1845）
