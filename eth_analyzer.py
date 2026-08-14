@@ -206,11 +206,11 @@ def generate_report():
         {"type": "🔴 反抽空", "entry": "1900-10受阻", "stop": "1920 (+13)", "tp": "1875 / 1860", "rr": "2.5:1", "size": "1%", "risk": "中"}
     ]
 
-    # 构建交易计划（无多余空行）
+    # 构建交易计划 - 每个策略用一行，用 | 分隔不同信息
     trade_lines = []
     for t in trades:
-        trade_lines.append(f"策略：{t['type']}\n入场：{t['entry']} | 止损：{t['stop']}\n止盈：{t['tp']} | 盈亏比：{t['rr']} | 仓位：{t['size']} | 风险：{t['risk']}")
-    trade_section = "\n\n".join(trade_lines)
+        trade_lines.append(f"策略：{t['type']} | 入场：{t['entry']} | 止损：{t['stop']} | 止盈：{t['tp']} | 盈亏比：{t['rr']} | 仓位：{t['size']} | 风险：{t['risk']}")
+    trade_section = "\n".join(trade_lines)
 
     # 构建持仓管理
     pos_lines = [
