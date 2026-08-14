@@ -47,39 +47,6 @@ def get_eth_price():
             pass
     return 1850.00
 
-def get_eth_today_stats():
-    """获取ETH当日真实最高最低（从日线K线获取）"""
-    try:
-        # 获取最近2根日线K线
-        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&limit=2"
-        resp = requests.get(url, timeout=8)
-        if resp.status_code == 200:
-            data = resp.json()
-            if len(data) >= 2:
-                # 倒数第一根是今日未完成K线，倒数第二根是昨日完整K线
-                today = data[-1]      # 今日（未完成）
-                yesterday = data[-2]  # 昨日（完整）
-                
-                # 获取昨日收盘价（作为今日开盘参考）
-                yesterday_close = float(yesterday[4])
-                
-                # 今日数据（实时更新）
-                today_high = float(today[2])
-                today_low = float(today[3])
-                today_open = float(today[1])
-                today_close = float(today[4])
-                
-                return {
-                    "high": today_high,
-                    "low": today_low,
-                    "open": today_open,
-                    "close": today_close,
-                    "prev_close": yesterday_close
-                }
-    except Exception as e:
-        print(f"⚠️ 获取日线数据失败: {e}")
-    return None
-
 def get_eth_klines():
     """获取ETH K线数据（计算ATR和均线）"""
     try:
@@ -241,9 +208,10 @@ def get_trading_signal(price, levels, sentiment_score, ma20):
     return signal, confidence
 
 def get_position_advice(price, levels, atr, sentiment_score):
-    """生成更精准的操作建议，接近当前价格"""
+    """生成精准的操作建议"""
     stop_distance = max(atr * 0.6, 6)
     
+    # 做多方案 - 基于当前价格下方最近的支撑位
     supports = [levels["支撑1"], levels["支撑2"], levels["铁底"]]
     valid_supports = [s for s in supports if s < price]
     if valid_supports:
@@ -251,17 +219,19 @@ def get_position_advice(price, levels, atr, sentiment_score):
     else:
         base_entry = price - 15
     
-    if price - base_entry < 5:
-        long_entry = f"{price:.0f}-{price+5:.0f}"
-        long_stop = f"{price-10:.0f}"
-        long_tp1 = f"{price + (price - base_entry) * 0.8:.0f}"
-        long_tp2 = f"{price + (price - base_entry) * 1.5:.0f}"
+    # 如果价格已经非常接近支撑位，直接在当前价附近入场
+    if price - base_entry < 3:
+        long_entry = f"{price:.0f}"
+        long_stop = f"{price-8:.0f}"
+        long_tp1 = f"{price + (price - base_entry) * 1.2 + 3:.0f}"
+        long_tp2 = f"{price + (price - base_entry) * 2.0 + 5:.0f}"
     else:
-        long_entry = f"{base_entry:.0f}-{base_entry+5:.0f}"
-        long_stop = f"{base_entry-10:.0f}"
-        long_tp1 = f"{price + (price - base_entry) * 0.6:.0f}"
-        long_tp2 = f"{price + (price - base_entry) * 1.2:.0f}"
+        long_entry = f"{base_entry:.0f}-{base_entry+3:.0f}"
+        long_stop = f"{base_entry-8:.0f}"
+        long_tp1 = f"{price + (price - base_entry) * 0.6 + 2:.0f}"
+        long_tp2 = f"{price + (price - base_entry) * 1.2 + 3:.0f}"
     
+    # 做空方案 - 基于当前价格上方最近的压力位
     resistances = [levels["压力2"], levels["压力1"], levels["强压"]]
     valid_resistances = [r for r in resistances if r > price]
     if valid_resistances:
@@ -269,22 +239,20 @@ def get_position_advice(price, levels, atr, sentiment_score):
     else:
         base_entry = price + 15
     
-    if base_entry - price < 5:
-        short_entry = f"{price:.0f}-{price+5:.0f}"
-        short_stop = f"{price+10:.0f}"
-        short_tp1 = f"{price - (base_entry - price) * 0.8:.0f}"
-        short_tp2 = f"{price - (base_entry - price) * 1.5:.0f}"
+    if base_entry - price < 3:
+        short_entry = f"{price:.0f}"
+        short_stop = f"{price+8:.0f}"
+        short_tp1 = f"{price - (base_entry - price) * 1.2 - 3:.0f}"
+        short_tp2 = f"{price - (base_entry - price) * 2.0 - 5:.0f}"
     else:
-        short_entry = f"{base_entry:.0f}-{base_entry+5:.0f}"
-        short_stop = f"{base_entry+10:.0f}"
-        short_tp1 = f"{price - (base_entry - price) * 0.6:.0f}"
-        short_tp2 = f"{price - (base_entry - price) * 1.2:.0f}"
+        short_entry = f"{base_entry:.0f}-{base_entry+3:.0f}"
+        short_stop = f"{base_entry+8:.0f}"
+        short_tp1 = f"{price - (base_entry - price) * 0.6 - 2:.0f}"
+        short_tp2 = f"{price - (base_entry - price) * 1.2 - 3:.0f}"
     
     return {
         "long": {"entry": long_entry, "stop": long_stop, "tp1": long_tp1, "tp2": long_tp2},
         "short": {"entry": short_entry, "stop": short_stop, "tp1": short_tp1, "tp2": short_tp2},
-        "nearest_support": base_entry if valid_supports else price-15,
-        "nearest_resistance": base_entry if valid_resistances else price+15,
         "stop_distance": f"{stop_distance:.0f}"
     }
 
@@ -312,28 +280,10 @@ def generate_report():
     price = get_eth_price()
     price_display = f"${price:.2f}"
     
-    # 获取当日真实最高最低
-    today_stats = get_eth_today_stats()
-    if today_stats:
-        day_high = today_stats["high"]
-        day_low = today_stats["low"]
-        day_open = today_stats["open"]
-        prev_close = today_stats["prev_close"]
-    else:
-        # 备用数据
-        day_high = price + 20
-        day_low = price - 20
-        day_open = price
-        prev_close = price
-    
-    day_range = day_high - day_low
-    
-    # 获取技术指标
     kline = get_eth_klines()
     fng = get_fear_greed_index()
     news_list = fetch_eth_news()
     
-    # 百度NLP分析
     token = get_baidu_access_token()
     analysis_results = []
     if token:
@@ -361,31 +311,11 @@ def generate_report():
     advice = get_position_advice(price, levels, kline["atr"], sentiment_score)
     priority = get_position_recommendation(sentiment_score, price, levels, fng)
     
-    # 计算日内位置百分比
-    if day_range > 0:
-        price_position_pct = (price - day_low) / day_range * 100
-        if price_position_pct > 80:
-            pos_desc_day = "🔺 高位（接近当日最高）"
-        elif price_position_pct > 60:
-            pos_desc_day = "📈 中高位"
-        elif price_position_pct > 40:
-            pos_desc_day = "📊 中位"
-        elif price_position_pct > 20:
-            pos_desc_day = "📉 中低位"
-        else:
-            pos_desc_day = "🔻 低位（接近当日最低）"
-    else:
-        pos_desc_day = "无法判断"
-    
-    # 计算振幅百分比
-    amplitude_pct = (day_range / day_low) * 100 if day_low > 0 else 0
-    
     reasons = [
         f"📊 综合情绪评分 {sentiment_score:.0f}%",
         f"📍 价格处于{pos_desc}（强度:{pos_strength}）",
         f"📈 MA20: {kline['ma20']:.0f}，价格在{'上方' if price > kline['ma20'] else '下方'}",
-        f"😨 F&G: {fng['value']}（{fng['label']}）",
-        f"📊 日内位置: {pos_desc_day}"
+        f"😨 F&G: {fng['value']}（{fng['label']}）"
     ]
     
     risks = []
@@ -404,15 +334,6 @@ def generate_report():
 📊 ETH-AI 全视角分析
 📅 {now} (北京时间)
 💰 ETH实时价格: {price_display}
-
-📊 当日行情数据
-📈 当日最高: ${day_high:.2f}
-📉 当日最低: ${day_low:.2f}
-📏 日内波幅: ${day_range:.2f}（{day_range:.0f}点）
-📊 振幅: {amplitude_pct:.1f}%
-📍 当前价格: {price_display}（{pos_desc_day}）
-📊 开盘价: ${day_open:.2f} | 昨日收盘: ${prev_close:.2f}
-
 🤖 AI状态: ✅ 已连接 · AI引擎运行中
 
 📰 情绪面分析
