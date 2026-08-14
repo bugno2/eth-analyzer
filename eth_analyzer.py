@@ -47,76 +47,62 @@ def get_eth_price():
             pass
     return 1850.00
 
-def get_eth_klines():
-    """获取ETH K线数据（计算ATR、均线、当日最高最低）"""
+def get_eth_today_stats():
+    """获取ETH当日真实最高最低（从日线K线获取）"""
     try:
-        # 获取日线数据用于当日最高最低
-        url_daily = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&limit=3"
-        resp_daily = requests.get(url_daily, timeout=8)
-        
-        # 获取小时线数据用于MA20和ATR
-        url_hourly = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=50"
-        resp_hourly = requests.get(url_hourly, timeout=8)
-        
-        result = {"ma20": 1850, "atr": 15, "close": 1850, "day_high": 1880, "day_low": 1840}
-        
-        # 解析日线数据（当日最高最低）
-        if resp_daily.status_code == 200:
-            daily_data = resp_daily.json()
-            if len(daily_data) >= 1:
-                # 最后一根是今日未完成K线，取昨日K线作为今日参考
-                today_k = daily_data[-1]
-                result["day_high"] = float(today_k[2])
-                result["day_low"] = float(today_k[3])
-                # 计算昨日波幅
-                prev_k = daily_data[-2] if len(daily_data) >= 2 else today_k
-                result["prev_day_high"] = float(prev_k[2])
-                result["prev_day_low"] = float(prev_k[3])
-        
-        # 解析小时线数据（MA20和ATR）
-        if resp_hourly.status_code == 200:
-            hourly_data = resp_hourly.json()
-            closes = [float(c[4]) for c in hourly_data]
-            if len(closes) >= 20:
-                result["ma20"] = sum(closes[-20:]) / 20
-            else:
-                result["ma20"] = closes[-1] if closes else 1850
-            
-            # 计算ATR
-            tr_values = []
-            for i in range(1, len(hourly_data)):
-                high = float(hourly_data[i][2])
-                low = float(hourly_data[i][3])
-                prev_close = float(hourly_data[i-1][4])
-                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-                tr_values.append(tr)
-            if tr_values:
-                result["atr"] = sum(tr_values[-14:]) / 14 if len(tr_values) >= 14 else sum(tr_values) / len(tr_values)
-            result["close"] = closes[-1] if closes else 1850
-        
-        return result
-    except Exception as e:
-        print(f"⚠️ K线数据获取异常: {e}")
-        return {"ma20": 1850, "atr": 15, "close": 1850, "day_high": 1880, "day_low": 1840}
-
-def get_eth_24h_stats():
-    """获取ETH 24小时统计（最高、最低、涨跌幅）"""
-    try:
-        url = "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"
+        # 获取最近2根日线K线
+        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&limit=2"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
-            return {
-                "high": float(data["highPrice"]),
-                "low": float(data["lowPrice"]),
-                "open": float(data["openPrice"]),
-                "close": float(data["lastPrice"]),
-                "change": float(data["priceChange"]),
-                "change_percent": float(data["priceChangePercent"])
-            }
+            if len(data) >= 2:
+                # 倒数第一根是今日未完成K线，倒数第二根是昨日完整K线
+                today = data[-1]      # 今日（未完成）
+                yesterday = data[-2]  # 昨日（完整）
+                
+                # 获取昨日收盘价（作为今日开盘参考）
+                yesterday_close = float(yesterday[4])
+                
+                # 今日数据（实时更新）
+                today_high = float(today[2])
+                today_low = float(today[3])
+                today_open = float(today[1])
+                today_close = float(today[4])
+                
+                return {
+                    "high": today_high,
+                    "low": today_low,
+                    "open": today_open,
+                    "close": today_close,
+                    "prev_close": yesterday_close
+                }
+    except Exception as e:
+        print(f"⚠️ 获取日线数据失败: {e}")
+    return None
+
+def get_eth_klines():
+    """获取ETH K线数据（计算ATR和均线）"""
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=50"
+        resp = requests.get(url, timeout=8)
+        if resp.status_code == 200:
+            data = resp.json()
+            closes = [float(c[4]) for c in data]
+            highs = [float(c[2]) for c in data]
+            lows = [float(c[3]) for c in data]
+            ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1]
+            tr_values = []
+            for i in range(1, len(data)):
+                high = float(data[i][2])
+                low = float(data[i][3])
+                prev_close = float(data[i-1][4])
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                tr_values.append(tr)
+            atr = sum(tr_values[-14:]) / 14 if len(tr_values) >= 14 else tr_values[-1] if tr_values else 0
+            return {"ma20": ma20, "atr": atr, "close": closes[-1]}
     except:
         pass
-    return None
+    return {"ma20": 1850, "atr": 15, "close": 1850}
 
 def get_fear_greed_index():
     try:
@@ -238,7 +224,6 @@ def analyze_sentiment_score(news_sentiment, fng_value, price, levels):
     return max(0, min(100, combined))
 
 def get_trading_signal(price, levels, sentiment_score, ma20):
-    above_ma = price > ma20
     if sentiment_score >= 70 and price <= levels["支撑1"]:
         signal, confidence = "🟢 强烈做多", "高"
     elif sentiment_score >= 60 and price <= levels["支撑2"]:
@@ -326,26 +311,29 @@ def generate_report():
     now = get_beijing_time()
     price = get_eth_price()
     price_display = f"${price:.2f}"
+    
+    # 获取当日真实最高最低
+    today_stats = get_eth_today_stats()
+    if today_stats:
+        day_high = today_stats["high"]
+        day_low = today_stats["low"]
+        day_open = today_stats["open"]
+        prev_close = today_stats["prev_close"]
+    else:
+        # 备用数据
+        day_high = price + 20
+        day_low = price - 20
+        day_open = price
+        prev_close = price
+    
+    day_range = day_high - day_low
+    
+    # 获取技术指标
     kline = get_eth_klines()
-    stats_24h = get_eth_24h_stats()
     fng = get_fear_greed_index()
     news_list = fetch_eth_news()
     
-    # 使用24小时统计获取当日最高最低
-    if stats_24h:
-        day_high = stats_24h["high"]
-        day_low = stats_24h["low"]
-        day_change = stats_24h["change"]
-        day_change_percent = stats_24h["change_percent"]
-        day_range = day_high - day_low
-    else:
-        # 备用：从日线K线获取
-        day_high = kline.get("day_high", price + 20)
-        day_low = kline.get("day_low", price - 20)
-        day_range = day_high - day_low
-        day_change = 0
-        day_change_percent = 0
-    
+    # 百度NLP分析
     token = get_baidu_access_token()
     analysis_results = []
     if token:
@@ -373,28 +361,31 @@ def generate_report():
     advice = get_position_advice(price, levels, kline["atr"], sentiment_score)
     priority = get_position_recommendation(sentiment_score, price, levels, fng)
     
-    # 判断价格在当日波幅中的位置
+    # 计算日内位置百分比
     if day_range > 0:
-        price_position = (price - day_low) / day_range * 100
-        if price_position > 80:
-            pos_desc_day = "高位（接近当日最高）"
-        elif price_position > 60:
-            pos_desc_day = "中高位"
-        elif price_position > 40:
-            pos_desc_day = "中位"
-        elif price_position > 20:
-            pos_desc_day = "中低位"
+        price_position_pct = (price - day_low) / day_range * 100
+        if price_position_pct > 80:
+            pos_desc_day = "🔺 高位（接近当日最高）"
+        elif price_position_pct > 60:
+            pos_desc_day = "📈 中高位"
+        elif price_position_pct > 40:
+            pos_desc_day = "📊 中位"
+        elif price_position_pct > 20:
+            pos_desc_day = "📉 中低位"
         else:
-            pos_desc_day = "低位（接近当日最低）"
+            pos_desc_day = "🔻 低位（接近当日最低）"
     else:
         pos_desc_day = "无法判断"
+    
+    # 计算振幅百分比
+    amplitude_pct = (day_range / day_low) * 100 if day_low > 0 else 0
     
     reasons = [
         f"📊 综合情绪评分 {sentiment_score:.0f}%",
         f"📍 价格处于{pos_desc}（强度:{pos_strength}）",
         f"📈 MA20: {kline['ma20']:.0f}，价格在{'上方' if price > kline['ma20'] else '下方'}",
         f"😨 F&G: {fng['value']}（{fng['label']}）",
-        f"📊 日内价格位置: {pos_desc_day}"
+        f"📊 日内位置: {pos_desc_day}"
     ]
     
     risks = []
@@ -418,8 +409,9 @@ def generate_report():
 📈 当日最高: ${day_high:.2f}
 📉 当日最低: ${day_low:.2f}
 📏 日内波幅: ${day_range:.2f}（{day_range:.0f}点）
-📍 当前价格: {price_display}（日内位置: {pos_desc_day}）
-📊 涨跌幅: {day_change:+.2f}（{day_change_percent:+.2f}%）
+📊 振幅: {amplitude_pct:.1f}%
+📍 当前价格: {price_display}（{pos_desc_day}）
+📊 开盘价: ${day_open:.2f} | 昨日收盘: ${prev_close:.2f}
 
 🤖 AI状态: ✅ 已连接 · AI引擎运行中
 
