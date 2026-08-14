@@ -27,7 +27,6 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 def get_beijing_time():
     return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-
 # ========== 1. 数据获取层 ==========
 
 def get_eth_price():
@@ -57,11 +56,7 @@ def get_eth_klines():
             closes = [float(c[4]) for c in data]
             highs = [float(c[2]) for c in data]
             lows = [float(c[3]) for c in data]
-            
-            # 计算MA20
             ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1]
-            
-            # 计算ATR (14周期)
             tr_values = []
             for i in range(1, len(data)):
                 high = float(data[i][2])
@@ -70,20 +65,12 @@ def get_eth_klines():
                 tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
                 tr_values.append(tr)
             atr = sum(tr_values[-14:]) / 14 if len(tr_values) >= 14 else tr_values[-1] if tr_values else 0
-            
-            return {
-                "ma20": ma20,
-                "atr": atr,
-                "close": closes[-1],
-                "high": highs[-1],
-                "low": lows[-1]
-            }
+            return {"ma20": ma20, "atr": atr, "close": closes[-1]}
     except:
         pass
-    return {"ma20": 1850, "atr": 15, "close": 1850, "high": 1850, "low": 1850}
+    return {"ma20": 1850, "atr": 15, "close": 1850}
 
 def get_fear_greed_index():
-    """获取恐惧贪婪指数"""
     try:
         url = "https://api.alternative.me/fng/?limit=1"
         resp = requests.get(url, timeout=5)
@@ -95,13 +82,8 @@ def get_fear_greed_index():
     return {"value": 45, "label": "中性"}
 
 def fetch_eth_news():
-    """获取ETH新闻"""
     try:
-        rss_urls = [
-            "https://cointelegraph.com/feed",
-            "https://cryptopotato.com/feed",
-            "https://coindesk.com/feed"
-        ]
+        rss_urls = ["https://cointelegraph.com/feed", "https://cryptopotato.com/feed", "https://coindesk.com/feed"]
         news_list = []
         for url in rss_urls:
             try:
@@ -119,15 +101,10 @@ def fetch_eth_news():
     return DEMO_NEWS
 
 def get_baidu_access_token():
-    """获取百度Token"""
     if not BAIDU_API_KEY or not BAIDU_SECRET_KEY:
         return None
     url = "https://aip.baidubce.com/oauth/2.0/token"
-    params = {
-        "grant_type": "client_credentials",
-        "client_id": BAIDU_API_KEY,
-        "client_secret": BAIDU_SECRET_KEY
-    }
+    params = {"grant_type": "client_credentials", "client_id": BAIDU_API_KEY, "client_secret": BAIDU_SECRET_KEY}
     try:
         resp = requests.post(url, params=params, timeout=10)
         if resp.status_code == 200:
@@ -137,7 +114,6 @@ def get_baidu_access_token():
     return None
 
 def analyze_sentiment(text, token):
-    """百度情感分析"""
     if not token:
         return None
     url = "https://aip.baidubce.com/rpc/2.0/nlp/v1/sentiment_classify"
@@ -148,11 +124,7 @@ def analyze_sentiment(text, token):
         result = resp.json()
         if "items" in result and len(result["items"]) > 0:
             item = result["items"][0]
-            return {
-                "sentiment": {0: "负面", 1: "中性", 2: "正面"}.get(item.get("sentiment"), "未知"),
-                "positive_prob": round(item.get("positive_prob", 0), 3),
-                "negative_prob": round(item.get("negative_prob", 0), 3)
-            }
+            return {"sentiment": {0: "负面", 1: "中性", 2: "正面"}.get(item.get("sentiment"), "未知"), "positive_prob": round(item.get("positive_prob", 0), 3), "negative_prob": round(item.get("negative_prob", 0), 3)}
     except:
         pass
     return None
@@ -162,9 +134,9 @@ def analyze_sentiment(text, token):
 
 def calculate_levels(price, atr):
     """基于价格和ATR计算动态关键位"""
-    atr_step = max(atr, 10)
-    base = round(price / 10) * 10
-    
+    atr_step = max(atr * 1.2, 8)
+    # 根据价格当前位置微调
+    base = round(price / 5) * 5
     return {
         "强压": base + int(atr_step * 3),
         "压力1": base + int(atr_step * 2),
@@ -176,35 +148,31 @@ def calculate_levels(price, atr):
     }
 
 def analyze_price_position(price, levels):
-    """分析价格位置"""
     if price >= levels["强压"]:
-        return "突破强压", "极强", 1.0
+        return "突破强压区", "极强"
     elif price >= levels["压力1"]:
-        return "压力区上沿", "强", 0.8
+        return "高位压力区", "强"
     elif price >= levels["压力2"]:
-        return "压力区", "中性偏强", 0.6
+        return "中上区域", "中性偏强"
     elif price >= levels["支撑1"]:
-        return "中轴附近", "中性", 0.5
+        return "中轴附近", "中性"
     elif price >= levels["支撑2"]:
-        return "支撑区", "中性偏弱", 0.4
+        return "低位支撑区", "中性偏弱"
     elif price >= levels["铁底"]:
-        return "支撑区下沿", "弱", 0.2
+        return "铁底区域", "弱"
     else:
-        return "跌破铁底", "极弱", 0.0
+        return "跌破铁底", "极弱"
 
-def analyze_sentiment_score(news_sentiment, fng_value):
+def analyze_sentiment_score(news_sentiment, fng_value, price, levels):
     """综合情绪评分 (0-100)"""
-    # 新闻情绪评分
     if news_sentiment == "偏多":
         news_score = 70
     elif news_sentiment == "偏空":
         news_score = 30
     else:
         news_score = 50
-    
-    # F&G评分 (恐惧<30为多头机会, >70为空头风险)
     if fng_value <= 25:
-        fng_score = 80  # 极度恐惧 = 潜在买入机会
+        fng_score = 80
     elif fng_value <= 45:
         fng_score = 60
     elif fng_value <= 55:
@@ -212,105 +180,115 @@ def analyze_sentiment_score(news_sentiment, fng_value):
     elif fng_value <= 75:
         fng_score = 30
     else:
-        fng_score = 20  # 极度贪婪 = 潜在卖出风险
-    
-    # 综合评分 (新闻40% + F&G60%)
-    combined = news_score * 0.4 + fng_score * 0.6
-    return combined
+        fng_score = 20
+    # 价格位置修正
+    if price <= levels["支撑2"]:
+        position_bonus = 10
+    elif price >= levels["压力1"]:
+        position_bonus = -10
+    else:
+        position_bonus = 0
+    combined = news_score * 0.35 + fng_score * 0.45 + (50 + position_bonus) * 0.2
+    return max(0, min(100, combined))
 
 def get_trading_signal(price, levels, sentiment_score, ma20):
-    """生成交易信号"""
-    # 判断价格与均线关系
     above_ma = price > ma20
-    ma_trend = "上升" if above_ma else "下降"
-    
-    # 判断价格位置
-    if price >= levels["压力1"]:
-        position = "高位"
-        base_action = "做空/减仓" if sentiment_score < 50 else "观望"
-    elif price <= levels["支撑2"]:
-        position = "低位"
-        base_action = "做多/加仓" if sentiment_score > 50 else "观望"
-    else:
-        position = "中位"
-        base_action = "震荡操作"
-    
-    # 综合信号
-    if sentiment_score >= 65 and price <= levels["支撑1"]:
-        signal = "🟢 强烈做多"
-        confidence = "高"
-    elif sentiment_score >= 55 and price <= levels["支撑2"]:
-        signal = "🟢 偏多"
-        confidence = "中"
-    elif sentiment_score <= 35 and price >= levels["压力1"]:
-        signal = "🔴 强烈做空"
-        confidence = "高"
-    elif sentiment_score <= 45 and price >= levels["压力2"]:
-        signal = "🔴 偏空"
-        confidence = "中"
+    if sentiment_score >= 70 and price <= levels["支撑1"]:
+        signal, confidence = "🟢 强烈做多", "高"
+    elif sentiment_score >= 60 and price <= levels["支撑2"]:
+        signal, confidence = "🟢 偏多", "中"
+    elif sentiment_score <= 30 and price >= levels["压力1"]:
+        signal, confidence = "🔴 强烈做空", "高"
+    elif sentiment_score <= 40 and price >= levels["压力2"]:
+        signal, confidence = "🔴 偏空", "中"
     elif sentiment_score >= 55:
-        signal = "🟡 震荡偏多"
-        confidence = "低"
+        signal, confidence = "🟡 震荡偏多", "低"
     elif sentiment_score <= 45:
-        signal = "🟡 震荡偏空"
-        confidence = "低"
+        signal, confidence = "🟡 震荡偏空", "低"
     else:
-        signal = "⚪ 观望"
-        confidence = "低"
-    
-    return signal, confidence, position, ma_trend
+        signal, confidence = "⚪ 观望", "低"
+    return signal, confidence
 
-def get_position_advice(price, levels, atr):
-    """生成具体操作建议"""
-    nearest_support = max([l for l in [levels["支撑1"], levels["支撑2"], levels["铁底"]] if l < price], default=price-20)
-    nearest_resistance = min([l for l in [levels["压力2"], levels["压力1"], levels["强压"]] if l > price], default=price+20)
+def get_position_advice(price, levels, atr, sentiment_score):
+    """生成更精准的操作建议，接近当前价格"""
+    # 动态计算入场价 - 更贴近当前价格
+    stop_distance = max(atr * 0.6, 6)
     
-    stop_distance = max(atr * 0.8, 8)
+    # 做多：在当前价格下方找支撑
+    supports = [levels["支撑1"], levels["支撑2"], levels["铁底"]]
+    valid_supports = [s for s in supports if s < price]
+    if valid_supports:
+        base_entry = max(valid_supports)
+    else:
+        base_entry = price - 15
     
-    # 做多建议
-    long_entry = nearest_support
-    long_stop = nearest_support - stop_distance
-    long_tp1 = price + (price - nearest_support) * 0.6
-    long_tp2 = nearest_resistance
+    # 如果当前价格已经接近支撑（距离<5），入场价就设在当前价
+    if price - base_entry < 5:
+        long_entry = f"{price:.0f}-{price+5:.0f}"
+        long_stop = f"{price-10:.0f}"
+        long_tp1 = f"{price + (price - base_entry) * 0.8:.0f}"
+        long_tp2 = f"{price + (price - base_entry) * 1.5:.0f}"
+    else:
+        long_entry = f"{base_entry:.0f}-{base_entry+5:.0f}"
+        long_stop = f"{base_entry-10:.0f}"
+        long_tp1 = f"{price + (price - base_entry) * 0.6:.0f}"
+        long_tp2 = f"{price + (price - base_entry) * 1.2:.0f}"
     
-    # 做空建议
-    short_entry = nearest_resistance
-    short_stop = nearest_resistance + stop_distance
-    short_tp1 = price - (nearest_resistance - price) * 0.6
-    short_tp2 = nearest_support
+    # 做空：在当前价格上方找压力
+    resistances = [levels["压力2"], levels["压力1"], levels["强压"]]
+    valid_resistances = [r for r in resistances if r > price]
+    if valid_resistances:
+        base_entry = min(valid_resistances)
+    else:
+        base_entry = price + 15
+    
+    if base_entry - price < 5:
+        short_entry = f"{price:.0f}-{price+5:.0f}"
+        short_stop = f"{price+10:.0f}"
+        short_tp1 = f"{price - (base_entry - price) * 0.8:.0f}"
+        short_tp2 = f"{price - (base_entry - price) * 1.5:.0f}"
+    else:
+        short_entry = f"{base_entry:.0f}-{base_entry+5:.0f}"
+        short_stop = f"{base_entry+10:.0f}"
+        short_tp1 = f"{price - (base_entry - price) * 0.6:.0f}"
+        short_tp2 = f"{price - (base_entry - price) * 1.2:.0f}"
     
     return {
-        "long": {
-            "entry": f"{long_entry:.0f}-{long_entry+5:.0f}",
-            "stop": f"{long_stop:.0f}",
-            "tp1": f"{long_tp1:.0f}",
-            "tp2": f"{long_tp2:.0f}"
-        },
-        "short": {
-            "entry": f"{short_entry:.0f}-{short_entry+5:.0f}",
-            "stop": f"{short_stop:.0f}",
-            "tp1": f"{short_tp1:.0f}",
-            "tp2": f"{short_tp2:.0f}"
-        },
-        "nearest_support": nearest_support,
-        "nearest_resistance": nearest_resistance,
+        "long": {"entry": long_entry, "stop": long_stop, "tp1": long_tp1, "tp2": long_tp2},
+        "short": {"entry": short_entry, "stop": short_stop, "tp1": short_tp1, "tp2": short_tp2},
+        "nearest_support": base_entry if valid_supports else price-15,
+        "nearest_resistance": base_entry if valid_resistances else price+15,
         "stop_distance": f"{stop_distance:.0f}"
     }
+
+def get_position_recommendation(sentiment_score, price, levels, fng):
+    """根据综合情况给出最优先的操作建议"""
+    if sentiment_score >= 65 and price <= levels["支撑1"]:
+        return "🎯 优先做多（情绪偏多+价格在支撑区）"
+    elif sentiment_score >= 55 and price <= levels["支撑2"]:
+        return "🎯 可考虑做多（情绪温和+价格在低位）"
+    elif sentiment_score <= 35 and price >= levels["压力1"]:
+        return "🎯 优先做空（情绪偏空+价格在压力区）"
+    elif sentiment_score <= 45 and price >= levels["压力2"]:
+        return "🎯 可考虑做空（情绪偏空+价格在中高位）"
+    elif sentiment_score >= 55 and price >= levels["压力2"]:
+        return "🎯 等待回调后再做多（价格偏高）"
+    elif sentiment_score <= 45 and price <= levels["支撑2"]:
+        return "🎯 等待反弹后再做空（价格偏低）"
+    else:
+        return "🎯 建议观望（情绪和价格位置不匹配）"
 
 
 # ========== 3. 报告生成层 ==========
 
 def generate_report():
     now = get_beijing_time()
-    
-    # 获取数据
     price = get_eth_price()
     price_display = f"${price:.2f}"
     kline = get_eth_klines()
     fng = get_fear_greed_index()
     news_list = fetch_eth_news()
     
-    # 百度NLP分析
     token = get_baidu_access_token()
     analysis_results = []
     if token:
@@ -319,77 +297,42 @@ def generate_report():
             if result:
                 analysis_results.append({**result, "title": news})
     
-    # 情绪统计
     if analysis_results and len(analysis_results) > 0:
         neg_count = sum(1 for r in analysis_results if r["sentiment"] == "负面")
         pos_count = sum(1 for r in analysis_results if r["sentiment"] == "正面")
         if neg_count > pos_count:
-            news_sentiment = "偏空"
-            detail = f"负面{int(neg_count/len(analysis_results)*100)}% / 正面{int(pos_count/len(analysis_results)*100)}%"
+            news_sentiment, detail = "偏空", f"负面{int(neg_count/len(analysis_results)*100)}% / 正面{int(pos_count/len(analysis_results)*100)}%"
         elif pos_count > neg_count:
-            news_sentiment = "偏多"
-            detail = f"正面{int(pos_count/len(analysis_results)*100)}% / 负面{int(neg_count/len(analysis_results)*100)}%"
+            news_sentiment, detail = "偏多", f"正面{int(pos_count/len(analysis_results)*100)}% / 负面{int(neg_count/len(analysis_results)*100)}%"
         else:
-            news_sentiment = "中性"
-            detail = f"正面50% / 负面50%"
+            news_sentiment, detail = "中性", "正面50% / 负面50%"
     else:
-        news_sentiment = "中性"
-        detail = "正面50% / 负面50%"
+        news_sentiment, detail = "中性", "正面50% / 负面50%"
     
-    # 计算关键位
     levels = calculate_levels(price, kline["atr"])
+    pos_desc, pos_strength = analyze_price_position(price, levels)
+    sentiment_score = analyze_sentiment_score(news_sentiment, fng["value"], price, levels)
+    signal, confidence = get_trading_signal(price, levels, sentiment_score, kline["ma20"])
+    advice = get_position_advice(price, levels, kline["atr"], sentiment_score)
+    priority = get_position_recommendation(sentiment_score, price, levels, fng)
     
-    # 分析价格位置
-    pos_desc, pos_strength, pos_score = analyze_price_position(price, levels)
+    reasons = [
+        f"📊 综合情绪评分 {sentiment_score:.0f}%",
+        f"📍 价格处于{pos_desc}（强度:{pos_strength}）",
+        f"📈 MA20: {kline['ma20']:.0f}，价格在{'上方' if price > kline['ma20'] else '下方'}",
+        f"😨 F&G: {fng['value']}（{fng['label']}）"
+    ]
     
-    # 综合情绪评分
-    sentiment_score = analyze_sentiment_score(news_sentiment, fng["value"])
-    
-    # 生成交易信号
-    signal, confidence, position, ma_trend = get_trading_signal(price, levels, sentiment_score, kline["ma20"])
-    
-    # 生成操作建议
-    advice = get_position_advice(price, levels, kline["atr"])
-    
-    # 决策理由
-    reasons = []
-    if sentiment_score >= 55:
-        reasons.append(f"📊 综合情绪评分 {sentiment_score:.0f}/100，偏多头")
-    elif sentiment_score <= 45:
-        reasons.append(f"📊 综合情绪评分 {sentiment_score:.0f}/100，偏空头")
-    else:
-        reasons.append(f"📊 综合情绪评分 {sentiment_score:.0f}/100，中性")
-    
-    if pos_score >= 0.6:
-        reasons.append(f"📍 价格处于{pos_desc}（强度:{pos_strength}）")
-    elif pos_score <= 0.4:
-        reasons.append(f"📍 价格处于{pos_desc}（强度:{pos_strength}）")
-    else:
-        reasons.append(f"📍 价格处于{pos_desc}")
-    
-    if price > kline["ma20"]:
-        reasons.append(f"📈 价格在MA20({kline['ma20']:.0f})上方，短期趋势偏多")
-    else:
-        reasons.append(f"📉 价格在MA20({kline['ma20']:.0f})下方，短期趋势偏空")
-    
-    if fng["value"] <= 30:
-        reasons.append(f"😨 恐惧贪婪指数 {fng['value']}（{fng['label']}），市场恐慌，可能超跌反弹")
-    elif fng["value"] >= 70:
-        reasons.append(f"😰 恐惧贪婪指数 {fng['value']}（{fng['label']}），市场贪婪，注意回调风险")
-    else:
-        reasons.append(f"😐 恐惧贪婪指数 {fng['value']}（{fng['label']}），市场情绪平稳")
-    
-    # 风险提示
     risks = []
     if price >= levels["压力1"]:
         risks.append("⚠️ 价格处于压力区，追多风险较大")
     if price <= levels["支撑2"]:
         risks.append("⚠️ 价格处于支撑区，注意破位下行风险")
     if fng["value"] >= 70:
-        risks.append("⚠️ 市场贪婪情绪较重，注意回调")
+        risks.append("⚠️ 市场贪婪，注意回调")
     if fng["value"] <= 20:
-        risks.append("⚠️ 市场极度恐慌，可能继续下跌")
-    if len(risks) == 0:
+        risks.append("⚠️ 市场恐慌，可能继续下跌")
+    if not risks:
         risks.append("⚪ 当前无明显极端风险")
     
     # 构建报告
@@ -400,20 +343,18 @@ def generate_report():
 🤖 AI状态: ✅ 已连接 · AI引擎运行中
 
 📰 情绪面分析
-ETH价格: {price_display}
 新闻情绪: {news_sentiment}（{detail}）
 恐惧贪婪: {fng['value']}（{fng['label']}）
-综合情绪评分: {sentiment_score:.0f}/100
+综合情绪评分: {sentiment_score:.0f}%
 
 📈 技术面分析
 价格位置: {pos_desc}（强度:{pos_strength}）
-MA20趋势: {ma_trend}（MA20={kline['ma20']:.0f}）
+MA20趋势: {kline['ma20']:.0f}（价格在{'上方' if price > kline['ma20'] else '下方'}）
 ATR波动率: ${kline['atr']:.1f}
 
 🎯 交易信号
-信号: {signal}
-置信度: {confidence}
-当前状态: {position}
+信号: {signal} | 置信度: {confidence}
+{priority}
 
 📉 动态关键位
 🔴 强压: {levels['强压']}
@@ -422,18 +363,9 @@ ATR波动率: ${kline['atr']:.1f}
 🟢 铁底: {levels['铁底']}
 
 📋 具体操作建议
-
-【做多方案】
-入场: {advice['long']['entry']}
-止损: {advice['long']['stop']}（约 {advice['stop_distance']} 点）
-止盈: {advice['long']['tp1']} / {advice['long']['tp2']}
-适合: 价格回调至支撑区 + 情绪偏多时
-
-【做空方案】
-入场: {advice['short']['entry']}
-止损: {advice['short']['stop']}（约 {advice['stop_distance']} 点）
-止盈: {advice['short']['tp1']} / {advice['short']['tp2']}
-适合: 价格反弹至压力区 + 情绪偏空时
+【做多方案】入场: {advice['long']['entry']} | 止损: {advice['long']['stop']}（约{advice['stop_distance']}点）| 止盈: {advice['long']['tp1']} / {advice['long']['tp2']}
+【做空方案】入场: {advice['short']['entry']} | 止损: {advice['short']['stop']}（约{advice['stop_distance']}点）| 止盈: {advice['short']['tp1']} / {advice['short']['tp2']}
+📌 优先方向: {'做多' if sentiment_score >= 55 else '做空' if sentiment_score <= 45 else '观望'}
 
 📦 动态持仓管理
 📉 到 {levels['支撑1']} → 持盈，止盈上移至 {levels['支撑1']+5}
@@ -447,14 +379,11 @@ ATR波动率: ${kline['atr']:.1f}
 ⚠️ 风险提示
 {chr(10).join(risks)}
 
-🔑 综合策略
-建议: {signal}
-策略: 分批止盈 + 移动止损 + 严控仓位
+🔑 综合策略: {signal} | 分批止盈 + 移动止损 + 严控仓位
 
 ⚠️ 分析仅供参考，投资决策需自行判断，盈亏自负。
 """
     return report
-
 
 def send_to_feishu(content):
     if not FEISHU_WEBHOOK:
