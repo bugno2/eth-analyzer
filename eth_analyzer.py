@@ -206,11 +206,13 @@ def generate_report():
         {"type": "🔴 反抽空", "entry": "1900-10受阻", "stop": "1920 (+13)", "tp": "1875 / 1860", "rr": "2.5:1", "size": "1%", "risk": "中"}
     ]
 
+    # 构建交易计划（无多余空行）
     trade_lines = []
     for t in trades:
         trade_lines.append(f"策略：{t['type']}\n入场：{t['entry']} | 止损：{t['stop']}\n止盈：{t['tp']} | 盈亏比：{t['rr']} | 仓位：{t['size']} | 风险：{t['risk']}")
     trade_section = "\n\n".join(trade_lines)
 
+    # 构建持仓管理
     pos_lines = [
         "📉 到1875 → 持盈，止盈上移至1860（保本锁利）",
         "📉 到1860-65 → 全部离场（支撑告破）",
@@ -267,7 +269,7 @@ def generate_fallback_report(now, price_display):
 🟢 支撑: 1875 / 1860（破位看1845）
 🟢 铁底: 1845（多空分界线）
 
-⚠️ 分析仅供参考
+⚠️ 分析仅供参考，投资决策需自行判断，盈亏自负。
 """
 
 def send_to_feishu(content):
