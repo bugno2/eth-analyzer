@@ -27,6 +27,7 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 def get_beijing_time():
     return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
+
 # ========== 1. 数据获取层 ==========
 
 def get_eth_price():
@@ -65,10 +66,19 @@ def get_eth_klines():
                 tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
                 tr_values.append(tr)
             atr = sum(tr_values[-14:]) / 14 if len(tr_values) >= 14 else tr_values[-1] if tr_values else 0
-            return {"ma20": ma20, "atr": atr, "close": closes[-1]}
+            # 当日最高最低（取最近24小时K线）
+            day_high = max(highs[-24:]) if len(highs) >= 24 else max(highs)
+            day_low = min(lows[-24:]) if len(lows) >= 24 else min(lows)
+            return {
+                "ma20": ma20,
+                "atr": atr,
+                "close": closes[-1],
+                "day_high": day_high,
+                "day_low": day_low
+            }
     except:
         pass
-    return {"ma20": 1850, "atr": 15, "close": 1850}
+    return {"ma20": 1850, "atr": 15, "close": 1850, "day_high": 1880, "day_low": 1840}
 
 def get_fear_greed_index():
     try:
@@ -135,7 +145,6 @@ def analyze_sentiment(text, token):
 def calculate_levels(price, atr):
     """基于价格和ATR计算动态关键位"""
     atr_step = max(atr * 1.2, 8)
-    # 根据价格当前位置微调
     base = round(price / 5) * 5
     return {
         "强压": base + int(atr_step * 3),
@@ -181,7 +190,6 @@ def analyze_sentiment_score(news_sentiment, fng_value, price, levels):
         fng_score = 30
     else:
         fng_score = 20
-    # 价格位置修正
     if price <= levels["支撑2"]:
         position_bonus = 10
     elif price >= levels["压力1"]:
@@ -211,10 +219,8 @@ def get_trading_signal(price, levels, sentiment_score, ma20):
 
 def get_position_advice(price, levels, atr, sentiment_score):
     """生成更精准的操作建议，接近当前价格"""
-    # 动态计算入场价 - 更贴近当前价格
     stop_distance = max(atr * 0.6, 6)
     
-    # 做多：在当前价格下方找支撑
     supports = [levels["支撑1"], levels["支撑2"], levels["铁底"]]
     valid_supports = [s for s in supports if s < price]
     if valid_supports:
@@ -222,7 +228,6 @@ def get_position_advice(price, levels, atr, sentiment_score):
     else:
         base_entry = price - 15
     
-    # 如果当前价格已经接近支撑（距离<5），入场价就设在当前价
     if price - base_entry < 5:
         long_entry = f"{price:.0f}-{price+5:.0f}"
         long_stop = f"{price-10:.0f}"
@@ -234,7 +239,6 @@ def get_position_advice(price, levels, atr, sentiment_score):
         long_tp1 = f"{price + (price - base_entry) * 0.6:.0f}"
         long_tp2 = f"{price + (price - base_entry) * 1.2:.0f}"
     
-    # 做空：在当前价格上方找压力
     resistances = [levels["压力2"], levels["压力1"], levels["强压"]]
     valid_resistances = [r for r in resistances if r > price]
     if valid_resistances:
@@ -262,7 +266,6 @@ def get_position_advice(price, levels, atr, sentiment_score):
     }
 
 def get_position_recommendation(sentiment_score, price, levels, fng):
-    """根据综合情况给出最优先的操作建议"""
     if sentiment_score >= 65 and price <= levels["支撑1"]:
         return "🎯 优先做多（情绪偏多+价格在支撑区）"
     elif sentiment_score >= 55 and price <= levels["支撑2"]:
@@ -288,6 +291,9 @@ def generate_report():
     kline = get_eth_klines()
     fng = get_fear_greed_index()
     news_list = fetch_eth_news()
+    
+    # 当日波幅
+    day_range = kline["day_high"] - kline["day_low"]
     
     token = get_baidu_access_token()
     analysis_results = []
@@ -335,11 +341,17 @@ def generate_report():
     if not risks:
         risks.append("⚪ 当前无明显极端风险")
     
-    # 构建报告
     report = f"""
 📊 ETH-AI 全视角分析
 📅 {now} (北京时间)
 💰 ETH实时价格: {price_display}
+
+📊 当日行情数据
+📈 当日最高: ${kline['day_high']:.2f}
+📉 当日最低: ${kline['day_low']:.2f}
+📏 日内波幅: ${day_range:.2f}（{day_range:.0f}点）
+📍 当前价格: {price_display}
+
 🤖 AI状态: ✅ 已连接 · AI引擎运行中
 
 📰 情绪面分析
