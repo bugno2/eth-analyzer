@@ -74,6 +74,18 @@ def get_detailed_klines():
             recent_high = max(highs[-20:]) if len(highs) >= 20 else max(highs)
             recent_low = min(lows[-20:]) if len(lows) >= 20 else min(lows)
             
+            # 识别关键高点和低点（前高前低）
+            key_highs = []
+            key_lows = []
+            for i in range(2, len(highs)-2):
+                if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                    key_highs.append(highs[i])
+                if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                    key_lows.append(lows[i])
+            
+            recent_key_high = key_highs[-1] if key_highs else recent_high
+            recent_key_low = key_lows[-1] if key_lows else recent_low
+            
             return {
                 "ma20": ma20,
                 "atr": atr,
@@ -81,7 +93,9 @@ def get_detailed_klines():
                 "highs": highs,
                 "lows": lows,
                 "recent_high": recent_high,
-                "recent_low": recent_low
+                "recent_low": recent_low,
+                "key_high": recent_key_high,
+                "key_low": recent_key_low
             }
     except Exception as e:
         print(f"⚠️ K线数据获取异常: {e}")
@@ -153,35 +167,37 @@ def analyze_sentiment(text, token):
 
 # ========== 2. 分析引擎层 ==========
 
-def calculate_levels_from_kline(price, atr, recent_high, recent_low):
-    """基于真实K线数据计算动态关键位"""
-    # 支撑：近期低点，如果价格在低点下方，则用价格-ATR
-    if price > recent_low:
-        support_1 = recent_low
-        support_2 = recent_low - atr * 0.6
+def calculate_levels_from_kline(price, atr, recent_high, recent_low, key_high, key_low):
+    """基于真实K线数据计算动态关键位（使用前高前低）"""
+    # 优先使用关键位（前高前低），如果没有则使用近期高低点
+    if key_high and key_high > price:
+        resistance_1 = key_high
     else:
-        support_1 = price - atr * 0.6
-        support_2 = price - atr * 1.3
+        resistance_1 = recent_high if recent_high > price else price + atr * 0.8
     
-    # 压力：近期高点，如果价格在高点上方，则用价格+ATR
-    if price < recent_high:
-        resistance_1 = recent_high
-        resistance_2 = recent_high + atr * 0.6
+    if key_low and key_low < price:
+        support_1 = key_low
     else:
-        resistance_1 = price + atr * 0.6
-        resistance_2 = price + atr * 1.3
+        support_1 = recent_low if recent_low < price else price - atr * 0.8
     
-    # 铁底：当前价下方两个ATR
-    iron_bottom = price - atr * 1.8
+    # 第二支撑/压力（用ATR扩展）
+    support_2 = support_1 - atr * 0.6
+    resistance_2 = resistance_1 + atr * 0.6
+    
+    # 铁底和强压（用ATR扩展）
+    iron_bottom = support_1 - atr * 1.2
+    strong_resistance = resistance_1 + atr * 1.2
     
     return {
-        "强压": int(resistance_2),
+        "强压": int(strong_resistance),
         "压力1": int(resistance_1),
-        "压力2": int(price + atr * 0.3),
+        "压力2": int(resistance_1 - atr * 0.3 if resistance_1 - atr * 0.3 > price else resistance_1 - atr * 0.5),
         "支撑1": int(support_1),
         "支撑2": int(support_2),
         "铁底": int(iron_bottom),
-        "当前": price
+        "当前": price,
+        "key_high": int(key_high) if key_high else None,
+        "key_low": int(key_low) if key_low else None
     }
 
 def analyze_price_position(price, levels):
@@ -254,19 +270,24 @@ def get_position_advice(price, levels, atr, sentiment_score):
     else:
         base_entry = price - atr_step * 0.6
     
-    # 如果价格已经非常接近支撑位，直接在当前价附近入场
-    if price - base_entry <= 3:
+    # 价格过滤逻辑：根据价格与支撑位的距离调整入场策略
+    distance_to_support = price - base_entry
+    
+    if distance_to_support <= 2:
+        # 价格已在支撑位，直接入场
         long_entry = f"{price:.0f}"
         long_stop = f"{int(price - atr_step * stop_multiplier)}"
-        long_tp1 = f"{int(price + atr_step * 1.2)}"
-        long_tp2 = f"{int(price + atr_step * 2.0)}"
-    elif price - base_entry <= 8:
-        long_entry = f"{base_entry:.0f}"
-        long_stop = f"{int(base_entry - atr_step * stop_multiplier)}"
-        long_tp1 = f"{int(price + atr_step * 0.8)}"
-        long_tp2 = f"{int(price + atr_step * 1.5)}"
-    else:
+        long_tp1 = f"{int(price + atr_step * 1.0)}"
+        long_tp2 = f"{int(price + atr_step * 1.8)}"
+    elif distance_to_support <= 8:
+        # 价格接近支撑位，等待回调入场
         long_entry = f"{base_entry:.0f}-{base_entry+3:.0f}"
+        long_stop = f"{int(base_entry - atr_step * stop_multiplier)}"
+        long_tp1 = f"{int(base_entry + atr_step * 1.2)}"
+        long_tp2 = f"{int(base_entry + atr_step * 2.0)}"
+    else:
+        # 价格离支撑位较远，等深度回调
+        long_entry = f"{base_entry:.0f}-{base_entry+5:.0f}"
         long_stop = f"{int(base_entry - atr_step * stop_multiplier)}"
         long_tp1 = f"{int(base_entry + atr_step * 1.5)}"
         long_tp2 = f"{int(base_entry + atr_step * 2.5)}"
@@ -280,18 +301,20 @@ def get_position_advice(price, levels, atr, sentiment_score):
     else:
         base_entry = price + atr_step * 0.6
     
-    if base_entry - price <= 3:
+    distance_to_resistance = base_entry - price
+    
+    if distance_to_resistance <= 2:
         short_entry = f"{price:.0f}"
         short_stop = f"{int(price + atr_step * stop_multiplier)}"
-        short_tp1 = f"{int(price - atr_step * 1.2)}"
-        short_tp2 = f"{int(price - atr_step * 2.0)}"
-    elif base_entry - price <= 8:
-        short_entry = f"{base_entry:.0f}"
-        short_stop = f"{int(base_entry + atr_step * stop_multiplier)}"
-        short_tp1 = f"{int(price - atr_step * 0.8)}"
-        short_tp2 = f"{int(price - atr_step * 1.5)}"
-    else:
+        short_tp1 = f"{int(price - atr_step * 1.0)}"
+        short_tp2 = f"{int(price - atr_step * 1.8)}"
+    elif distance_to_resistance <= 8:
         short_entry = f"{base_entry:.0f}-{base_entry+3:.0f}"
+        short_stop = f"{int(base_entry + atr_step * stop_multiplier)}"
+        short_tp1 = f"{int(base_entry - atr_step * 1.2)}"
+        short_tp2 = f"{int(base_entry - atr_step * 2.0)}"
+    else:
+        short_entry = f"{base_entry:.0f}-{base_entry+5:.0f}"
         short_stop = f"{int(base_entry + atr_step * stop_multiplier)}"
         short_tp1 = f"{int(base_entry - atr_step * 1.5)}"
         short_tp2 = f"{int(base_entry - atr_step * 2.5)}"
@@ -331,7 +354,7 @@ def generate_report():
     # 获取K线数据
     kline = get_detailed_klines()
     if kline is None:
-        kline = {"ma20": 1850, "atr": 15, "recent_high": 1880, "recent_low": 1840}
+        kline = {"ma20": 1850, "atr": 15, "recent_high": 1880, "recent_low": 1840, "key_high": 1885, "key_low": 1835}
     
     # 获取其他数据
     fng = get_fear_greed_index()
@@ -360,7 +383,10 @@ def generate_report():
         news_sentiment, detail = "中性", "正面50% / 负面50%"
     
     # 计算关键位
-    levels = calculate_levels_from_kline(price, kline["atr"], kline["recent_high"], kline["recent_low"])
+    levels = calculate_levels_from_kline(
+        price, kline["atr"], kline["recent_high"], kline["recent_low"], 
+        kline.get("key_high"), kline.get("key_low")
+    )
     pos_desc, pos_strength = analyze_price_position(price, levels)
     sentiment_score = analyze_sentiment_score(news_sentiment, fng["value"])
     signal, confidence = get_trading_signal(price, levels, sentiment_score, kline["ma20"])
@@ -373,6 +399,7 @@ def generate_report():
     support_dist = price - nearest_support
     resistance_dist = nearest_resistance - price
     
+    # 构建决策依据
     reasons = [
         f"📊 综合情绪评分 {sentiment_score:.0f}%",
         f"📍 价格处于{pos_desc}（强度:{pos_strength}）",
@@ -381,6 +408,13 @@ def generate_report():
         f"📏 距支撑: {support_dist:.0f}点 | 距压力: {resistance_dist:.0f}点"
     ]
     
+    # 添加关键位信息
+    if levels.get("key_high"):
+        reasons.append(f"🔺 前高: {levels['key_high']}")
+    if levels.get("key_low"):
+        reasons.append(f"🔻 前低: {levels['key_low']}")
+    
+    # 风险提示
     risks = []
     if price >= levels["压力1"]:
         risks.append("⚠️ 价格处于压力区，追多风险较大")
