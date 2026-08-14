@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# eth_analyzer.py - ETH情感分析 + 飞书推送 (完整版：实时新闻 + 恐惧贪婪 + 动态策略)
+# eth_analyzer.py - ETH情感分析 + 飞书推送 (智能动态版)
 
 import requests
 import json
@@ -14,7 +14,6 @@ BAIDU_API_KEY = os.environ.get("BAIDU_API_KEY")
 BAIDU_SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY")
 # =========================================
 
-# ========== 备用新闻数据（当RSS不可用时使用）==========
 DEMO_NEWS = [
     "ETH价格震荡下行，市场情绪谨慎",
     "以太坊生态发展稳步推进，开发者活跃度上升",
@@ -27,7 +26,6 @@ def get_beijing_time():
     return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 def get_eth_price():
-    """获取ETH实时价格（带重试）"""
     urls = [
         "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT",
         "https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT"
@@ -39,31 +37,23 @@ def get_eth_price():
                 if resp.status_code == 200:
                     price = float(resp.json().get("price", 0))
                     if price > 0:
-                        print(f"✅ ETH实时价格: ${price}")
                         return price
             except:
                 pass
-    print("⚠️ ETH价格获取失败，使用模拟价格")
     return 1850.00
 
 def get_fear_greed_index():
-    """获取实时恐惧贪婪指数"""
     try:
         url = "https://api.alternative.me/fng/?limit=1"
         resp = requests.get(url, timeout=5)
         if resp.status_code == 200:
             data = resp.json()["data"][0]
-            return {
-                "value": int(data["value"]),
-                "label": data["value_classification"]
-            }
+            return {"value": int(data["value"]), "label": data["value_classification"]}
     except:
         pass
-    print("⚠️ 恐惧贪婪指数获取失败，使用备用值")
     return {"value": 45, "label": "中性"}
 
 def fetch_eth_news():
-    """从RSS获取ETH实时新闻"""
     try:
         rss_urls = [
             "https://cointelegraph.com/feed",
@@ -81,17 +71,13 @@ def fetch_eth_news():
             except:
                 continue
         if news_list:
-            print(f"✅ 获取到 {len(news_list)} 条ETH新闻")
             return news_list[:5]
     except:
         pass
-    print("⚠️ 新闻获取失败，使用备用数据")
     return DEMO_NEWS
 
 def get_baidu_access_token():
-    """获取百度Token"""
     if not BAIDU_API_KEY or not BAIDU_SECRET_KEY:
-        print("❌ 百度API Key未设置")
         return None
     url = "https://aip.baidubce.com/oauth/2.0/token"
     params = {
@@ -102,17 +88,12 @@ def get_baidu_access_token():
     try:
         resp = requests.post(url, params=params, timeout=10)
         if resp.status_code == 200:
-            token = resp.json().get("access_token")
-            if token:
-                print("✅ 百度Token获取成功")
-                return token
+            return resp.json().get("access_token")
     except:
         pass
-    print("❌ 百度Token获取失败")
     return None
 
 def analyze_sentiment(text, token):
-    """百度情感分析"""
     if not token:
         return None
     url = "https://aip.baidubce.com/rpc/2.0/nlp/v1/sentiment_classify"
@@ -132,30 +113,95 @@ def analyze_sentiment(text, token):
         pass
     return None
 
-def get_dynamic_advice(sentiment, price, support, resistance):
-    """根据情绪和价格位置生成动态建议"""
-    if sentiment == "偏空":
-        return "🔴 市场情绪偏空，建议以防守为主，等待企稳信号再入场"
-    elif sentiment == "偏多":
-        return "🟢 市场情绪偏多，可轻仓跟随，但需设置好止损"
-    elif price <= support[0]:
-        return "🟡 价格已逼近强支撑区，关注是否有止跌企稳迹象"
-    elif price >= resistance[0]:
-        return "🟡 价格已接近压力区，追多风险较大，建议等待回调"
+def calculate_dynamic_levels(price):
+    """根据当前价格动态计算支撑压力位"""
+    # 基于价格计算关键位（取整）
+    base = round(price / 5) * 5  # 按5美元取整
+    
+    levels = {
+        "强压": base + 45,
+        "压力1": base + 35,
+        "压力2": base + 20,
+        "支撑1": base - 15,
+        "支撑2": base - 30,
+        "铁底": base - 50,
+        "当前": price
+    }
+    
+    # 确保压力位 > 当前价 > 支撑位
+    while levels["支撑1"] >= price:
+        base -= 5
+        levels = {
+            "强压": base + 45,
+            "压力1": base + 35,
+            "压力2": base + 20,
+            "支撑1": base - 15,
+            "支撑2": base - 30,
+            "铁底": base - 50,
+            "当前": price
+        }
+    while levels["压力2"] <= price:
+        base += 5
+        levels = {
+            "强压": base + 45,
+            "压力1": base + 35,
+            "压力2": base + 20,
+            "支撑1": base - 15,
+            "支撑2": base - 30,
+            "铁底": base - 50,
+            "当前": price
+        }
+    
+    return levels
+
+def generate_dynamic_strategy(price, levels, sentiment, fng):
+    """根据价格位置生成动态策略"""
+    strategies = []
+    
+    # 距离当前价格最近的支撑和压力
+    nearest_support = max([l for l in [levels["支撑1"], levels["支撑2"], levels["铁底"]] if l < price])
+    nearest_resistance = min([l for l in [levels["压力2"], levels["压力1"], levels["强压"]] if l > price])
+    
+    # 计算距离
+    support_dist = (price - nearest_support) / price * 100
+    resistance_dist = (nearest_resistance - price) / price * 100
+    
+    # 动态入场建议
+    if support_dist < 1.5:
+        strategies.append(f"🟢 激进多 | 入场：{price:.0f}-{price+5:.0f} | 止损：{price-10:.0f} | 止盈：{nearest_resistance:.0f} / {nearest_resistance+15:.0f}")
+        strategies.append(f"🔵 稳健多 | 入场：{nearest_support:.0f}-{nearest_support+5:.0f} | 止损：{nearest_support-10:.0f} | 止盈：{price:.0f} / {nearest_resistance:.0f}")
+    elif resistance_dist < 1.5:
+        strategies.append(f"🔴 做空 | 入场：{price:.0f}-{price+5:.0f} | 止损：{price+10:.0f} | 止盈：{nearest_support:.0f} / {nearest_support-15:.0f}")
+        strategies.append(f"⚪ 观望 | 价格接近压力位，等待回调后再考虑做多")
     else:
-        return "⚪ 震荡格局，建议高抛低吸，控制仓位"
+        strategies.append(f"⚪ 区间震荡 | 可于 {nearest_support:.0f} 附近做多，{nearest_resistance:.0f} 附近做空")
+        strategies.append(f"🟢 做多 | 入场：{nearest_support:.0f}-{nearest_support+5:.0f} | 止损：{nearest_support-10:.0f} | 止盈：{nearest_resistance:.0f}")
+        strategies.append(f"🔴 做空 | 入场：{nearest_resistance:.0f}-{nearest_resistance+5:.0f} | 止损：{nearest_resistance+10:.0f} | 止盈：{nearest_support:.0f}")
+    
+    # 综合建议（结合情绪和F&G）
+    if sentiment == "偏多" and fng["value"] < 30:
+        advice = "🟢 市场情绪偏多 + 恐惧贪婪显示恐惧，可能是个较好的入场机会，建议分批建仓"
+    elif sentiment == "偏空" and fng["value"] > 70:
+        advice = "🔴 市场情绪偏空 + 恐惧贪婪显示贪婪，建议减仓或观望"
+    elif sentiment == "偏多":
+        advice = "🟢 市场情绪偏多，可轻仓跟随，设置好止损"
+    elif sentiment == "偏空":
+        advice = "🔴 市场情绪偏空，建议防守为主"
+    else:
+        advice = "⚪ 市场情绪中性，建议观望等待方向明确"
+    
+    return strategies, advice
 
 def generate_report():
-    """生成完整报告"""
     now = get_beijing_time()
-    print(f"🚀 开始分析，北京时间: {now}")
-
+    
+    # 获取数据
     price = get_eth_price()
     price_display = f"${price:.2f}" if price else "❌ 获取失败"
-
     fng = get_fear_greed_index()
     news_list = fetch_eth_news()
-
+    
+    # 百度NLP分析
     token = get_baidu_access_token()
     analysis_results = []
     if token:
@@ -163,8 +209,9 @@ def generate_report():
             result = analyze_sentiment(news, token)
             if result:
                 analysis_results.append({**result, "title": news})
-
-    if analysis_results:
+    
+    # 情绪统计
+    if analysis_results and len(analysis_results) > 0:
         neg_count = sum(1 for r in analysis_results if r["sentiment"] == "负面")
         pos_count = sum(1 for r in analysis_results if r["sentiment"] == "正面")
         if neg_count > pos_count:
@@ -176,51 +223,35 @@ def generate_report():
         else:
             sentiment = "中性"
             detail = f"正面50% / 负面50%"
-        sample_news = analysis_results[0]["title"][:30] + "..." if analysis_results else "暂无"
     else:
         sentiment = "中性"
-        detail = "正面50% / 负面50%（备用数据）"
-        sample_news = "暂时无法获取实时新闻"
-
-    levels = {
-        "强压": 1920,
-        "压力": 1915,
-        "支撑": 1875,
-        "铁底": 1845
-    }
-
-    levels_display = {
-        "强压": {"price": 1920, "desc": "最后关口，突破翻多"},
-        "压力": {"price": "1915 / 1905", "desc": "反弹试空区"},
-        "支撑": {"price": "1875 / 1860", "desc": "破位看1845"},
-        "铁底": {"price": 1845, "desc": "多空分界线"}
-    }
-
-    advice = get_dynamic_advice(sentiment, price, [levels["支撑"], levels["铁底"]], [levels["压力"], levels["强压"]])
-
-    trades = [
-        {"type": "🟢 激进多", "entry": "1845-1850", "stop": "1835 (-12)", "tp": "1875 / 1900", "rr": "2.5:1", "size": "1%", "risk": "中"},
-        {"type": "🟢 稳健多", "entry": "1830-1835", "stop": "1820 (-13)", "tp": "1865 / 1890", "rr": "2.7:1", "size": "2%", "risk": "中低"},
-        {"type": "🟢 极限多", "entry": "1818-1825", "stop": "1805 (-15)", "tp": "1850 / 1875", "rr": "2.3:1", "size": "0.5%", "risk": "高"},
-        {"type": "🔵 右侧多", "entry": "回踩1860-65不破", "stop": "1850 (-13)", "tp": "1900 / 1915", "rr": "3.2:1", "size": "1.5%", "risk": "中低"},
-        {"type": "🔴 反抽空", "entry": "1900-10受阻", "stop": "1920 (+13)", "tp": "1875 / 1860", "rr": "2.5:1", "size": "1%", "risk": "中"}
+        detail = "正面50% / 负面50%"
+    
+    # 动态计算关键位
+    levels = calculate_dynamic_levels(price)
+    
+    # 动态生成策略
+    strategies, advice = generate_dynamic_strategy(price, levels, sentiment, fng)
+    
+    # 格式化输出
+    levels_display = [
+        f"🔴 强压: {levels['强压']}",
+        f"🔴 压力: {levels['压力1']} / {levels['压力2']}",
+        f"🟢 支撑: {levels['支撑1']} / {levels['支撑2']}",
+        f"🟢 铁底: {levels['铁底']}"
     ]
-
-    # 构建交易计划 - 每个策略用一行，用 | 分隔不同信息
-    trade_lines = []
-    for t in trades:
-        trade_lines.append(f"策略：{t['type']} | 入场：{t['entry']} | 止损：{t['stop']} | 止盈：{t['tp']} | 盈亏比：{t['rr']} | 仓位：{t['size']} | 风险：{t['risk']}")
-    trade_section = "\n".join(trade_lines)
-
-    # 构建持仓管理
+    
+    strategy_lines = [f"策略：{s}" for s in strategies]
+    strategy_section = "\n".join(strategy_lines)
+    
     pos_lines = [
-        "📉 到1875 → 持盈，止盈上移至1860（保本锁利）",
-        "📉 到1860-65 → 全部离场（支撑告破）",
-        "📈 反抽1900-10受阻 → 开空，分批加至标准（阻力确认）",
-        "📈 站稳1915超15分钟 → 止损走人，不补（空头失败）"
+        f"📉 到 {levels['支撑1']} → 持盈，止盈上移至 {levels['支撑1']+5}（保本锁利）",
+        f"📉 到 {levels['支撑2']} → 全部离场（支撑告破）",
+        f"📈 反抽 {levels['压力2']} 受阻 → 开空，分批加至标准（阻力确认）",
+        f"📈 站稳 {levels['压力1']} 超15分钟 → 止损走人，不补（空头失败）"
     ]
     pos_section = "\n".join(pos_lines)
-
+    
     report = f"""
 📊 ETH-AI 全视角分析
 📅 {now} (北京时间)
@@ -231,18 +262,15 @@ def generate_report():
 ETH价格: {price_display}
 新闻情绪: {sentiment}（{detail}）
 恐惧贪婪: {fng['value']}（{fng['label']}）
-综合判断: {sentiment}主导，市场情绪{'' if sentiment == '中性' else '明显'}分化
+综合判断: {sentiment}主导，市场情绪{'明显' if sentiment != '中性' else ''}分化
 
-📈 关键位（相对当前价格）
-🔴 强压: {levels_display['强压']['price']}（{levels_display['强压']['desc']}）
-🔴 压力: {levels_display['压力']['price']}（{levels_display['压力']['desc']}）
-🟢 支撑: {levels_display['支撑']['price']}（{levels_display['支撑']['desc']}）
-🟢 铁底: {levels_display['铁底']['price']}（{levels_display['铁底']['desc']}）
+📈 动态关键位（基于当前价格）
+{chr(10).join(levels_display)}
 
-📋 交易计划
-{trade_section}
+📋 智能交易策略
+{strategy_section}
 
-📦 持仓管理
+📦 动态持仓管理
 {pos_section}
 
 🧠 当前定调
@@ -261,15 +289,7 @@ def generate_fallback_report(now, price_display):
 💰 ETH实时价格: {price_display}
 🤖 AI状态: ⚠️ 未连接
 
-⚠️ 当前无法获取实时数据，以下为固定参考信息
-
-📈 关键位
-🔴 强压: 1920（突破翻多）
-🔴 压力: 1915 / 1905（反弹试空区）
-🟢 支撑: 1875 / 1860（破位看1845）
-🟢 铁底: 1845（多空分界线）
-
-⚠️ 分析仅供参考，投资决策需自行判断，盈亏自负。
+⚠️ 当前无法获取实时数据，请稍后再试
 """
 
 def send_to_feishu(content):
