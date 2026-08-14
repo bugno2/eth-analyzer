@@ -16,7 +16,9 @@ jobs:
           python-version: '3.10'
       
       - name: 安装依赖
-        run: pip install requests
+        run: |
+          pip install requests
+          pip install feedparser
       
       - name: 运行ETH分析脚本
         env:
@@ -24,4 +26,3 @@ jobs:
           BAIDU_API_KEY: ${{ secrets.BAIDU_API_KEY }}
           BAIDU_SECRET_KEY: ${{ secrets.BAIDU_SECRET_KEY }}
         run: python eth_analyzer.py
-        # test
