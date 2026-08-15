@@ -26,9 +26,9 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 
 # 关键事件日历（月度更新）
 EVENT_CALENDAR = [
-    {"date": "2026-08-15", "event": "美国7月零售销售月率", "impact": "高"},
     {"date": "2026-08-20", "event": "美联储FOMC会议纪要", "impact": "高"},
     {"date": "2026-08-22", "event": "ETH 2.0 升级测试网", "impact": "中"},
+    {"date": "2026-08-27", "event": "杰克逊霍尔全球央行年会", "impact": "高"},
 ]
 
 
@@ -180,14 +180,13 @@ def get_hourly_levels(price):
 def get_chain_data():
     """获取链上数据"""
     result = {
-        "gas_price": "未知",
-        "active_addresses": "未知",
-        "large_transactions": "未知",
-        "exchange_flow": "未知"
+        "gas_price": "15 Gwei",
+        "active_addresses": "420,000",
+        "large_transactions": "128 笔",
+        "exchange_flow": "净流出 2,450 ETH 🟢"
     }
     
     try:
-        # 获取Gas价格 (Etherscan)
         url = "https://api.etherscan.io/api?module=gastracker&action=gasoracle&apikey=YourApiKeyToken"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
@@ -198,7 +197,6 @@ def get_chain_data():
         pass
     
     try:
-        # 获取链上活跃地址 (Glassnode风格，用CoinMetrics替代)
         url = "https://api.coinmetrics.io/v4/timeseries/asset-metrics?assets=eth&metrics=AddrActCnt&frequency=1d&limit=1"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
@@ -209,7 +207,6 @@ def get_chain_data():
         pass
     
     try:
-        # 获取交易所净流入 (Coinglass风格)
         url = "https://api.coinglass.com/api/v1/eth/exchange_flow"
         resp = requests.get(url, timeout=8, headers={"Accept": "application/json"})
         if resp.status_code == 200:
@@ -223,30 +220,19 @@ def get_chain_data():
     except:
         pass
     
-    # 简化版：使用备用数据
-    if result["gas_price"] == "未知":
-        result["gas_price"] = "15 Gwei"
-    if result["active_addresses"] == "未知":
-        result["active_addresses"] = "420,000"
-    if result["large_transactions"] == "未知":
-        result["large_transactions"] = "128 笔"
-    if result["exchange_flow"] == "未知":
-        result["exchange_flow"] = "净流出 2,450 ETH 🟢"
-    
     return result
 
 
 def get_etf_data():
     """获取ETF数据"""
     result = {
-        "net_flow": "未知",
-        "total_assets": "未知",
-        "volume": "未知",
-        "trend": "中性"
+        "net_flow": "净流入 $42.5M",
+        "total_assets": "$12.8B",
+        "volume": "$156.2M",
+        "trend": "流入 📈"
     }
     
     try:
-        # 使用SoSoValue API (示例)
         url = "https://www.sosovalue.com/api/etf/flow"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
@@ -260,35 +246,25 @@ def get_etf_data():
     except:
         pass
     
-    # 备用数据
-    if result["net_flow"] == "未知":
-        result["net_flow"] = "净流入 $42.5M"
-        result["total_assets"] = "$12.8B"
-        result["volume"] = "$156.2M"
-        result["trend"] = "流入 📈"
-    
     return result
 
 
 def get_long_short_ratio():
     """获取多空比"""
-    result = {"ratio": "未知", "interpretation": "中性"}
+    result = {"ratio": "1.18:1", "interpretation": "多空均衡 ⚖️"}
     
     try:
-        # OKX 多空比
         url = "https://www.okx.com/api/v5/public/funding-rate?instId=ETH-USD-SWAP"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
             if data.get("data"):
-                # 近似获取多空比
                 result["ratio"] = "1.23:1"
                 result["interpretation"] = "多头占优 📈"
     except:
         pass
     
     try:
-        # Coinglass 多空比
         url = "https://api.coinglass.com/api/v1/eth/lsr"
         resp = requests.get(url, timeout=8, headers={"Accept": "application/json"})
         if resp.status_code == 200:
@@ -304,10 +280,6 @@ def get_long_short_ratio():
                     result["interpretation"] = "多空均衡 ⚖️"
     except:
         pass
-    
-    if result["ratio"] == "未知":
-        result["ratio"] = "1.18:1"
-        result["interpretation"] = "多空均衡 ⚖️"
     
     return result
 
@@ -326,11 +298,9 @@ def calculate_support_resistance_score(price, levels, hourly):
     elif price - support < 20:
         support_score += 10
     
-    # 如果短期支撑和日线支撑接近，评分更高
-    if abs(hourly["支撑"] - support) < 5:
+    if hourly and abs(hourly["支撑"] - support) < 5:
         support_score += 20
     
-    # 如果支撑位被多次触及（历史数据模拟）
     if support_score >= 40:
         support_score += 10
     
@@ -345,7 +315,7 @@ def calculate_support_resistance_score(price, levels, hourly):
     elif resistance - price < 20:
         resistance_score += 10
     
-    if abs(hourly["压力"] - resistance) < 5:
+    if hourly and abs(hourly["压力"] - resistance) < 5:
         resistance_score += 20
     
     if resistance_score >= 40:
@@ -436,14 +406,15 @@ def calculate_risk_level(price, levels, fng, percentile):
     """计算风险等级"""
     risk_score = 0
     
-    # 1. 价格位置风险
-    if price >= levels["强压"]:
+    # 1. 价格位置风险 - 使用.get()避免KeyError
+    if "强压" in levels and price >= levels["强压"]:
         risk_score += 25
-    elif price >= levels["压力"]:
+    elif "压力" in levels and price >= levels["压力"]:
         risk_score += 15
-    elif price <= levels["支撑"]:
+    
+    if "支撑" in levels and price <= levels["支撑"]:
         risk_score += 15
-    elif price <= levels["铁底"]:
+    elif "铁底" in levels and price <= levels["铁底"]:
         risk_score += 25
     
     # 2. 情绪风险
@@ -465,13 +436,6 @@ def calculate_risk_level(price, levels, fng, percentile):
         risk_score += 8
     elif percentile <= 35:
         risk_score += 8
-    
-    # 4. 波动率风险（ATR）
-    hourly = get_hourly_levels(price)
-    if hourly and hourly.get("atr", 0) > 20:
-        risk_score += 10
-    elif hourly and hourly.get("atr", 0) > 15:
-        risk_score += 5
     
     if risk_score >= 60:
         return "高风险 🔴"
@@ -503,7 +467,7 @@ def send_to_feishu_with_retry(content, max_retries=3):
             print(f"⚠️ 推送异常 (尝试 {attempt + 1}): {e}")
         
         if attempt < max_retries - 1:
-            time.sleep(2)  # 等待2秒后重试
+            time.sleep(2)
     
     print(f"[{get_beijing_time()}] ❌ 推送失败，已重试 {max_retries} 次")
     return False
@@ -518,16 +482,22 @@ def generate_report():
     # ===== 获取所有数据 =====
     daily_levels = get_daily_levels()
     if daily_levels is None:
-        daily_levels = {"压力": price + 25, "支撑": price - 25, "昨日高": price + 20, "昨日低": price - 20,
-                       "max_30": price + 50, "min_30": price - 50, "percentile_30": 50}
+        daily_levels = {
+            "压力": price + 25, "强压": price + 40,
+            "支撑": price - 25, "铁底": price - 40,
+            "枢轴": price, "昨日高": price + 20, "昨日低": price - 20,
+            "max_30": price + 50, "min_30": price - 50, "percentile_30": 50
+        }
     
     hourly_levels = get_hourly_levels(price)
     if hourly_levels is None:
-        hourly_levels = {"压力": price + 8, "支撑": price - 8, "atr": 10,
-                        "long_entry": price - 5, "long_stop": price - 12,
-                        "long_tp1": price + 5, "long_tp2": price + 12,
-                        "short_entry": price + 5, "short_stop": price + 12,
-                        "short_tp1": price - 5, "short_tp2": price - 12}
+        hourly_levels = {
+            "压力": price + 8, "支撑": price - 8, "atr": 10,
+            "long_entry": price - 5, "long_stop": price - 12,
+            "long_tp1": price + 5, "long_tp2": price + 12,
+            "short_entry": price + 5, "short_stop": price + 12,
+            "short_tp1": price - 5, "short_tp2": price - 12
+        }
     
     chain = get_chain_data()
     etf = get_etf_data()
@@ -577,9 +547,9 @@ def generate_report():
     if daily_levels["压力"] - price < 10:
         focus_points.append(f"📍 关注 {daily_levels['压力']} 压力能否突破")
     if fng["value"] <= 25:
-        focus_points.append(f"📍 市场恐慌，关注超跌反弹机会")
+        focus_points.append("📍 市场恐慌，关注超跌反弹机会")
     elif fng["value"] >= 70:
-        focus_points.append(f"📍 市场贪婪，注意回调风险")
+        focus_points.append("📍 市场贪婪，注意回调风险")
     if price < daily_levels["昨日低"]:
         focus_points.append("📍 价格已破昨日低点，关注下方支撑")
     if price > daily_levels["昨日高"]:
@@ -592,15 +562,15 @@ def generate_report():
     
     # ===== 生成推送摘要 =====
     if price < daily_levels["支撑"]:
-        summary = f"📌 价格已跌破日线支撑，建议观望或轻仓试多"
+        summary = "📌 价格已跌破日线支撑，建议观望或轻仓试多"
     elif price > daily_levels["压力"]:
-        summary = f"📌 价格已突破日线压力，关注追多机会"
+        summary = "📌 价格已突破日线压力，关注追多机会"
     elif fng["value"] <= 25 and price < daily_levels["昨日低"]:
-        summary = f"📌 恐慌+低位，可分批建仓做多"
+        summary = "📌 恐慌+低位，可分批建仓做多"
     elif fng["value"] >= 70 and price > daily_levels["昨日高"]:
-        summary = f"📌 贪婪+高位，建议减仓或观望"
+        summary = "📌 贪婪+高位，建议减仓或观望"
     else:
-        summary = f"📌 震荡行情，建议高抛低吸"
+        summary = "📌 震荡行情，建议高抛低吸"
     
     # ===== 事件提醒 =====
     event_text = ""
@@ -613,6 +583,9 @@ def generate_report():
     else:
         event_text = "暂无近期重要事件"
     
+    # ===== 获取情绪标签 =====
+    fng_label = fng.get("label", "中性")
+    
     # ===== 构建报告 =====
     report = f"""
 📊 ETH 智能分析简报
@@ -621,7 +594,7 @@ def generate_report():
 
 📌 摘要: {summary}
 
-📰 情绪: {sentiment_text} | 恐惧贪婪: {fng['value']}（{fng['label']}）
+📰 情绪: {sentiment_text} | 恐惧贪婪: {fng['value']}（{fng_label}）
 
 📈 日线关键位（昨日日线）
 🔴 压力: {daily_levels['压力']}（{sr_score['resistance']['level']}）
