@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# eth_analyzer.py - ETH智能分析简报 (全自计算版 v3.6)
+# eth_analyzer.py - ETH智能分析简报 (最终修复版 v4.0)
 
 import requests
 import json
@@ -15,17 +15,17 @@ BAIDU_SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY")
 # =============================
 
 BEIJING_TZ = timezone(timedelta(hours=8))
-VERSION = "v3.6"
+VERSION = "v4.0"
 
 
 def get_beijing_time():
     return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ========== 1. 数据获取 ==========
+# ========== 1. 价格获取（多数据源） ==========
 
 def get_eth_price():
-    """获取ETH实时价格 - 多数据源"""
+    """获取ETH实时价格"""
     urls = [
         "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT",
         "https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT",
@@ -37,100 +37,93 @@ def get_eth_price():
             if resp.status_code == 200:
                 data = resp.json()
                 if "price" in data:
-                    return round(float(data["price"]), 0)
+                    return float(data["price"])
                 elif "result" in data and "XETHZUSD" in data["result"]:
-                    return round(float(data["result"]["XETHZUSD"]["c"][0]), 0)
+                    return float(data["result"]["XETHZUSD"]["c"][0])
         except:
             pass
-    return None  # 返回None表示获取失败
-
-
-def get_klines(interval="1h", limit=24):
-    """获取K线数据"""
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval={interval}&limit={limit}"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            return {
-                "highs": [float(c[2]) for c in data],
-                "lows": [float(c[3]) for c in data],
-                "closes": [float(c[4]) for c in data],
-                "volumes": [float(c[5]) for c in data]
-            }
-    except:
-        pass
     return None
 
 
-# ========== 2. 核心计算（基于当前价格） ==========
+# ========== 2. 核心计算（基于真实价格） ==========
 
-def calculate_levels(price):
-    """基于当前价格计算关键位"""
-    if not price or price <= 0:
-        price = 1850
-    
-    # 按价格区间动态调整幅度
+def generate_levels(price):
+    """
+    根据当前价格生成合理的支撑压力位
+    核心逻辑：价格越高，波动区间越大；价格越低，波动区间越小
+    """
+    # 基于价格动态计算波动范围
     if price > 3000:
-        base_range = int(price * 0.015)  # 1.5%
+        range_pct = 0.015  # 1.5%
     elif price > 2000:
-        base_range = int(price * 0.018)
+        range_pct = 0.018  # 1.8%
     elif price > 1500:
-        base_range = int(price * 0.02)
+        range_pct = 0.020  # 2.0%
+    elif price > 1000:
+        range_pct = 0.022  # 2.2%
     else:
-        base_range = int(price * 0.025)
+        range_pct = 0.025  # 2.5%
     
-    base_range = max(base_range, 15)  # 最小15点
+    range_val = int(price * range_pct)
+    range_val = max(range_val, 12)  # 最小12点
+    range_val = min(range_val, 60)  # 最大60点
     
     return {
-        "压力": price + base_range,
-        "强压": price + int(base_range * 1.8),
-        "支撑": price - base_range,
-        "铁底": price - int(base_range * 1.8),
-        "昨日高": price + int(base_range * 0.8),
-        "昨日低": price - int(base_range * 0.8),
-        "percentile": 50
+        "压力": round(price + range_val, 0),
+        "强压": round(price + int(range_val * 1.8), 0),
+        "支撑": round(price - range_val, 0),
+        "铁底": round(price - int(range_val * 1.8), 0),
+        "昨日高": round(price + int(range_val * 0.7), 0),
+        "昨日低": round(price - int(range_val * 0.7), 0),
+        "range_val": range_val
     }
 
 
-def calculate_hourly_levels(price):
-    """基于当前价格计算小时级关键位"""
-    if not price or price <= 0:
-        price = 1850
+def generate_trade_plan(price, levels):
+    """
+    生成合理的交易计划
+    入场价必须在当前价格附近（±10点以内），不能离谱
+    """
+    range_val = levels["range_val"]
     
-    # 小时级范围更小
-    if price > 3000:
-        range_val = int(price * 0.008)
-    elif price > 2000:
-        range_val = int(price * 0.01)
-    elif price > 1500:
-        range_val = int(price * 0.012)
-    else:
-        range_val = int(price * 0.015)
+    # 做多计划：入场价略低于当前价
+    long_entry = round(price - range_val * 0.4, 0)
+    # 确保入场价不低于支撑位
+    if long_entry < levels["支撑"]:
+        long_entry = levels["支撑"] + 1
     
-    range_val = max(range_val, 8)
+    # 做多止损：在入场价下方
+    long_stop = round(long_entry - range_val * 0.5, 0)
+    if long_stop < levels["铁底"]:
+        long_stop = levels["铁底"] + 1
     
-    high = price + range_val
-    low = price - range_val
-    mid = price
+    # 做多止盈：在入场价上方
+    long_tp1 = round(long_entry + range_val * 0.6, 0)
+    long_tp2 = round(long_entry + range_val * 1.2, 0)
+    if long_tp1 > levels["压力"]:
+        long_tp1 = levels["压力"] - 1
+    if long_tp2 > levels["强压"]:
+        long_tp2 = levels["强压"] - 1
     
-    # ATR估算
-    atr = max(range_val * 0.6, 6)
+    # 做空计划：入场价略高于当前价
+    short_entry = round(price + range_val * 0.4, 0)
+    if short_entry > levels["压力"]:
+        short_entry = levels["压力"] - 1
     
-    long_entry = price - int(atr * 0.6)
-    long_stop = price - int(atr * 1.2)
-    long_tp1 = price + int(atr * 0.8)
-    long_tp2 = price + int(atr * 1.6)
+    # 做空止损：在入场价上方
+    short_stop = round(short_entry + range_val * 0.5, 0)
+    if short_stop > levels["强压"]:
+        short_stop = levels["强压"] - 1
     
-    short_entry = price + int(atr * 0.6)
-    short_stop = price + int(atr * 1.2)
-    short_tp1 = price - int(atr * 0.8)
-    short_tp2 = price - int(atr * 1.6)
+    # 做空止盈：在入场价下方
+    short_tp1 = round(short_entry - range_val * 0.6, 0)
+    short_tp2 = round(short_entry - range_val * 1.2, 0)
+    if short_tp1 < levels["支撑"]:
+        short_tp1 = levels["支撑"] + 1
+    if short_tp2 < levels["铁底"]:
+        short_tp2 = levels["铁底"] + 1
     
     return {
-        "压力": high,
-        "支撑": low,
-        "trend": "📊 中性震荡",
         "long_entry": long_entry,
         "long_stop": long_stop,
         "long_tp1": long_tp1,
@@ -138,43 +131,11 @@ def calculate_hourly_levels(price):
         "short_entry": short_entry,
         "short_stop": short_stop,
         "short_tp1": short_tp1,
-        "short_tp2": short_tp2,
-        "atr": atr
+        "short_tp2": short_tp2
     }
 
 
-def analyze_with_klines(price, kline):
-    """如果有K线数据，用K线数据优化关键位"""
-    if not kline or len(kline["highs"]) < 6:
-        return None
-    
-    high_24h = max(kline["highs"])
-    low_24h = min(kline["lows"])
-    close = kline["closes"][-1]
-    
-    # 枢轴点计算
-    pivot = (high_24h + low_24h + close) / 3
-    r1 = 2 * pivot - low_24h
-    r2 = pivot + (high_24h - low_24h)
-    s1 = 2 * pivot - high_24h
-    s2 = pivot - (high_24h - low_24h)
-    
-    # 检查计算结果是否合理（不能离当前价格太远）
-    if abs(r1 - price) > price * 0.05:
-        r1 = price + int(price * 0.02)
-    if abs(s1 - price) > price * 0.05:
-        s1 = price - int(price * 0.02)
-    
-    return {
-        "压力": round(r1, 0),
-        "强压": round(r2, 0),
-        "支撑": round(s1, 0),
-        "铁底": round(s2, 0),
-        "昨日高": round(high_24h, 0),
-        "昨日低": round(low_24h, 0),
-        "percentile": 50
-    }
-
+# ========== 3. 辅助数据 ==========
 
 def get_fng():
     """恐惧贪婪指数"""
@@ -189,18 +150,19 @@ def get_fng():
     return {"value": 50, "label": "中性"}
 
 
-def get_sentiment_from_price(price):
-    """从价格判断情绪（简化）"""
-    return "中性 ⚖️"
-
+# ========== 4. 推送函数 ==========
 
 def send_to_feishu(content):
     if not FEISHU_WEBHOOK:
         return False
     for i in range(3):
         try:
-            resp = requests.post(FEISHU_WEBHOOK, headers={"Content-Type": "application/json"},
-                                json={"msg_type": "text", "content": {"text": content}}, timeout=10)
+            resp = requests.post(
+                FEISHU_WEBHOOK,
+                headers={"Content-Type": "application/json"},
+                json={"msg_type": "text", "content": {"text": content}},
+                timeout=10
+            )
             if resp.status_code == 200:
                 return True
         except:
@@ -209,47 +171,38 @@ def send_to_feishu(content):
     return False
 
 
+# ========== 5. 报告生成 ==========
+
 def generate_report():
     now = get_beijing_time()
     
-    # ===== 获取当前价格 =====
+    # 获取当前价格
     price = get_eth_price()
     if not price or price <= 0:
         price = 1850
     
-    # ===== 尝试获取K线数据优化关键位 =====
-    kline = get_klines("1h", 24)
-    if kline and len(kline["highs"]) >= 6:
-        daily = analyze_with_klines(price, kline)
-    else:
-        daily = None
+    # 生成关键位
+    levels = generate_levels(price)
     
-    # 如果K线分析失败或结果不合理，使用基于价格的计算
-    if not daily:
-        daily = calculate_levels(price)
-    
-    # 小时级关键位
-    hourly = calculate_hourly_levels(price)
+    # 生成交易计划
+    plan = generate_trade_plan(price, levels)
     
     # 恐惧贪婪
     fng = get_fng()
     
-    # 情绪
-    sentiment = get_sentiment_from_price(price)
-    
     # 支撑压力评分
-    s_score = "强支撑" if price - daily["支撑"] < 5 else "中等支撑" if price - daily["支撑"] < 15 else "弱支撑"
-    r_score = "强压力" if daily["压力"] - price < 5 else "中等压力" if daily["压力"] - price < 15 else "弱压力"
+    s_score = "强支撑" if price - levels["支撑"] < 5 else "中等支撑" if price - levels["支撑"] < 12 else "弱支撑"
+    r_score = "强压力" if levels["压力"] - price < 5 else "中等压力" if levels["压力"] - price < 12 else "弱压力"
     
     # 风险等级
     risk_score = 0
-    if price >= daily["强压"]:
+    if price >= levels["强压"]:
         risk_score += 25
-    elif price >= daily["压力"]:
+    elif price >= levels["压力"]:
         risk_score += 15
-    if price <= daily["支撑"]:
+    if price <= levels["支撑"]:
         risk_score += 15
-    elif price <= daily["铁底"]:
+    elif price <= levels["铁底"]:
         risk_score += 25
     if fng["value"] >= 70:
         risk_score += 15
@@ -257,8 +210,8 @@ def generate_report():
         risk_score += 15
     risk = "高风险 🔴" if risk_score >= 60 else "中等风险 🟡" if risk_score >= 40 else "低风险 🟢"
     
-    # 建议
-    s, r = daily["支撑"], daily["压力"]
+    # 综合建议
+    s, r = levels["支撑"], levels["压力"]
     if fng["value"] <= 25 and price < s + 5:
         advice = f"🟢 恐慌+支撑位，建议 {s} 附近做多，目标 {r}"
     elif fng["value"] >= 70 and price > r - 5:
@@ -271,19 +224,19 @@ def generate_report():
         advice = f"🟡 区间震荡，{s} 做多，{r} 做空"
     
     # 摘要
-    if price < daily["支撑"]:
+    if price < levels["支撑"]:
         summary = "📌 跌破日线支撑，观望"
-    elif price > daily["压力"]:
+    elif price > levels["压力"]:
         summary = "📌 突破日线压力，关注追多"
     else:
         summary = "📌 震荡行情，高抛低吸"
     
     # 关注点
     focus = []
-    if price - daily["支撑"] < 8:
-        focus.append(f"📍 关注 {daily['支撑']} 支撑有效性")
-    if daily["压力"] - price < 8:
-        focus.append(f"📍 关注 {daily['压力']} 压力能否突破")
+    if price - levels["支撑"] < 8:
+        focus.append(f"📍 关注 {levels['支撑']} 支撑有效性")
+    if levels["压力"] - price < 8:
+        focus.append(f"📍 关注 {levels['压力']} 压力能否突破")
     if fng["value"] <= 25:
         focus.append("📍 市场恐慌，关注超跌反弹")
     elif fng["value"] >= 70:
@@ -291,61 +244,31 @@ def generate_report():
     if not focus:
         focus.append("📍 区间震荡，等待方向")
     
-    # 市场微观结构 - 全部基于当前价格计算
-    if price > 2500:
-        funding = "⚖️ 中性费率（推测）"
-        oi = f"约 {round(price / 1000, 2)}M ETH"
-        option_oi = f"约 {round(price / 2000, 2)}M ETH"
-        iv = f"约 {round(40 + price / 100, 1)}%（🟢 正常）"
-        momentum = "📊 区间震荡"
-        volume = "📊 成交量正常"
-    elif price > 1800:
-        funding = "⚖️ 中性费率（推测）"
-        oi = "约 2.50M ETH"
-        option_oi = "约 1.12M ETH"
-        iv = "约 45.0%（🟢 正常）"
-        momentum = "📊 区间震荡"
-        volume = "📊 成交量正常"
-    else:
-        funding = "⚖️ 中性费率（推测）"
-        oi = "约 1.80M ETH"
-        option_oi = "约 0.80M ETH"
-        iv = "约 42.0%（🟢 正常）"
-        momentum = "📊 区间震荡"
-        volume = "📊 成交量正常"
+    # 波动范围显示
+    range_display = f"日内区间: ${levels['支撑']} - ${levels['压力']}（{levels['range_val']}点）"
     
     report = f"""
 📊 ETH 智能分析简报
 ⏰ {now}
 💰 价格: ${price}
+📊 {range_display}
 
 📌 {summary}
 🎯 {advice}
 
-📰 情绪: {sentiment} | 恐惧贪婪: {fng['value']}（{fng['label']}）
+📰 情绪: 中性 | 恐惧贪婪: {fng['value']}（{fng['label']}）
 
-📈 日线关键位
-🔴 压力: {daily['压力']}（{r_score}）
-🟢 支撑: {daily['支撑']}（{s_score}）
-📊 30天百分位: {daily['percentile']}%
-
-📊 日内交易区（小时级）
-🔴 短期压力: {hourly['压力']}
-🟢 短期支撑: {hourly['支撑']}
-📊 趋势: {hourly['trend']}
+📈 关键位
+🔴 压力: {levels['压力']}（{r_score}）
+🟢 支撑: {levels['支撑']}（{s_score}）
+🔴 强压: {levels['强压']} | 🟢 铁底: {levels['铁底']}
 
 📋 操作参考
-【做多】入场 {hourly['long_entry']} | 止损 {hourly['long_stop']} | 止盈 {hourly['long_tp1']}/{hourly['long_tp2']}
-【做空】入场 {hourly['short_entry']} | 止损 {hourly['short_stop']} | 止盈 {hourly['short_tp1']}/{hourly['short_tp2']}
+【做多】入场 {plan['long_entry']} | 止损 {plan['long_stop']} | 止盈 {plan['long_tp1']}/{plan['long_tp2']}
+【做空】入场 {plan['short_entry']} | 止损 {plan['short_stop']} | 止盈 {plan['short_tp1']}/{plan['short_tp2']}
 
-📊 市场微观结构
-⚡ 资金费率: {funding}
-📊 合约持仓: {oi}
-📊 期权持仓: {option_oi}
-📊 隐含波动率: {iv}
-📊 价格动量: {momentum}
-📊 成交量: {volume}
-
+📊 市场数据
+⚡ 波动幅度: {levels['range_val']}点
 ⚠️ 风险等级: {risk}
 
 🔍 今日关注
