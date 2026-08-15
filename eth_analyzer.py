@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# eth_analyzer.py - ETH智能分析推送 (精简优化版)
+# eth_analyzer.py - ETH智能分析推送 (日线枢轴点版)
 
 import requests
 import json
@@ -44,38 +44,38 @@ def get_eth_price():
             pass
     return 1850.00
 
-def get_detailed_klines():
+def get_daily_levels():
+    """获取每日固定关键位（基于昨日日线，全天不变）"""
     try:
-        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=50"
+        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&limit=2"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
-            highs = [float(c[2]) for c in data]
-            lows = [float(c[3]) for c in data]
-            closes = [float(c[4]) for c in data]
-            
-            recent_high = max(highs[-20:]) if len(highs) >= 20 else max(highs)
-            recent_low = min(lows[-20:]) if len(lows) >= 20 else min(lows)
-            short_high = max(highs[-5:]) if len(highs) >= 5 else max(highs)
-            short_low = min(lows[-5:]) if len(lows) >= 5 else min(lows)
-            
-            tr_values = []
-            for i in range(1, len(data)):
-                high = float(data[i][2])
-                low = float(data[i][3])
-                prev_close = float(data[i-1][4])
-                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-                tr_values.append(tr)
-            atr = sum(tr_values[-14:]) / 14 if len(tr_values) >= 14 else tr_values[-1] if tr_values else 10
-            
-            return {
-                "recent_high": recent_high, "recent_low": recent_low,
-                "short_high": short_high, "short_low": short_low,
-                "atr": atr,
-                "ma20": sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1]
-            }
-    except:
-        return None
+            if len(data) >= 2:
+                yesterday = data[-2]
+                high = float(yesterday[2])
+                low = float(yesterday[3])
+                close = float(yesterday[4])
+                
+                # 枢轴点计算
+                pivot = (high + low + close) / 3
+                r1 = 2 * pivot - low
+                r2 = pivot + (high - low)
+                s1 = 2 * pivot - high
+                s2 = pivot - (high - low)
+                
+                return {
+                    "压力": round(r1, 0),
+                    "强压": round(r2, 0),
+                    "支撑": round(s1, 0),
+                    "铁底": round(s2, 0),
+                    "枢轴": round(pivot, 0),
+                    "昨日高": round(high, 0),
+                    "昨日低": round(low, 0)
+                }
+    except Exception as e:
+        print(f"⚠️ 获取日线数据失败: {e}")
+    return None
 
 def get_fear_greed_index():
     try:
@@ -139,54 +139,59 @@ def analyze_sentiment(text, token):
 
 # ========== 分析引擎 ==========
 
-def calculate_levels(price, kline):
-    atr = max(kline["atr"], 8)
-    
-    # 支撑位：取近期低点或短期低点
-    support_candidates = [s for s in [kline["short_low"], kline["recent_low"]] if s < price]
-    support_1 = max(support_candidates) if support_candidates else price - atr * 0.8
-    
-    # 压力位：取近期高点或短期高点
-    resistance_candidates = [r for r in [kline["short_high"], kline["recent_high"]] if r > price]
-    resistance_1 = min(resistance_candidates) if resistance_candidates else price + atr * 0.8
-    
-    return {
-        "压力": int(resistance_1),
-        "支撑": int(support_1),
-        "atr": int(atr)
-    }
-
 def get_position_advice(price, levels):
-    """生成简洁的操作建议"""
-    atr = levels["atr"]
+    """基于固定关键位生成操作建议"""
     support = levels["支撑"]
     resistance = levels["压力"]
+    pivot = levels.get("枢轴", (support + resistance) / 2)
     
-    # 做多建议
-    if price <= support + 3:
+    # 计算ATR（用于止损距离）
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=20"
+        resp = requests.get(url, timeout=8)
+        if resp.status_code == 200:
+            data = resp.json()
+            tr_values = []
+            for i in range(1, len(data)):
+                high = float(data[i][2])
+                low = float(data[i][3])
+                prev_close = float(data[i-1][4])
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                tr_values.append(tr)
+            atr = sum(tr_values[-10:]) / 10 if len(tr_values) >= 10 else 15
+        else:
+            atr = 15
+    except:
+        atr = 15
+    
+    # 做多：在支撑位入场
+    if price <= support + 5:
         long_entry = f"{price:.0f}"
-        long_stop = f"{price - atr * 1.5:.0f}"
+        long_stop = f"{price - atr:.0f}"
     else:
         long_entry = f"{support:.0f}"
-        long_stop = f"{support - atr * 1.5:.0f}"
+        long_stop = f"{support - atr:.0f}"
     
-    long_tp1 = f"{int(float(long_entry) + atr * 1.5)}"
-    long_tp2 = f"{int(float(long_entry) + atr * 2.5)}"
+    long_tp1 = f"{int(float(long_entry) + atr * 1.2)}"
+    long_tp2 = f"{int(resistance)}"
     
-    # 做空建议
-    if price >= resistance - 3:
+    # 做空：在压力位入场
+    if price >= resistance - 5:
         short_entry = f"{price:.0f}"
-        short_stop = f"{price + atr * 1.5:.0f}"
+        short_stop = f"{price + atr:.0f}"
     else:
         short_entry = f"{resistance:.0f}"
-        short_stop = f"{resistance + atr * 1.5:.0f}"
+        short_stop = f"{resistance + atr:.0f}"
     
-    short_tp1 = f"{int(float(short_entry) - atr * 1.5)}"
-    short_tp2 = f"{int(float(short_entry) - atr * 2.5)}"
+    short_tp1 = f"{int(float(short_entry) - atr * 1.2)}"
+    short_tp2 = f"{int(support)}"
     
     return {
         "long": {"entry": long_entry, "stop": long_stop, "tp1": long_tp1, "tp2": long_tp2},
-        "short": {"entry": short_entry, "stop": short_stop, "tp1": short_tp1, "tp2": short_tp2}
+        "short": {"entry": short_entry, "stop": short_stop, "tp1": short_tp1, "tp2": short_tp2},
+        "support": int(support),
+        "resistance": int(resistance),
+        "pivot": int(pivot)
     }
 
 
@@ -197,15 +202,16 @@ def generate_report():
     price = get_eth_price()
     price_display = f"${price:.2f}"
     
-    kline = get_detailed_klines()
-    if kline is None:
-        kline = {"recent_high": 1880, "recent_low": 1840, "short_high": 1870, "short_low": 1855, "atr": 15, "ma20": 1860}
+    # 获取每日固定关键位（全天不变）
+    daily_levels = get_daily_levels()
+    if daily_levels is None:
+        daily_levels = {"压力": price + 20, "支撑": price - 20, "枢轴": price}
     
+    # 获取情绪数据
     fng = get_fear_greed_index()
+    token = get_baidu_access_token()
     news_list = fetch_eth_news()
     
-    # 百度NLP分析
-    token = get_baidu_access_token()
     analysis_results = []
     if token:
         for news in news_list:
@@ -225,28 +231,39 @@ def generate_report():
     else:
         sentiment_text = "中性"
     
-    levels = calculate_levels(price, kline)
-    advice = get_position_advice(price, levels)
+    # 生成操作建议
+    advice = get_position_advice(price, daily_levels)
     
     # 判断当前价格位置
-    if price >= levels["压力"]:
+    support = advice["support"]
+    resistance = advice["resistance"]
+    
+    if price >= resistance:
         position_text = "🔴 压力区，注意回调"
-    elif price <= levels["支撑"]:
+    elif price <= support:
         position_text = "🟢 支撑区，关注反弹"
     else:
         position_text = "🟡 区间震荡，等待方向"
     
-    # 构建精简报告
+    # 计算日内位置
+    range_high = daily_levels.get("昨日高", resistance)
+    range_low = daily_levels.get("昨日低", support)
+    if range_high > range_low:
+        position_pct = (price - range_low) / (range_high - range_low) * 100
+        position_pct_text = f"（日内位置：{position_pct:.0f}%）"
+    else:
+        position_pct_text = ""
+    
     report = f"""
 📊 ETH 智能分析简报
 ⏰ {now}
-💰 价格: {price_display}
+💰 价格: {price_display} {position_pct_text}
 
 📰 情绪: {sentiment_text} | 恐惧贪婪: {fng['value']}（{fng['label']}）
 
-📈 关键位
-🔴 压力: {levels['压力']}
-🟢 支撑: {levels['支撑']}
+📈 今日关键位（基于昨日日线，全天有效）
+🔴 压力: {resistance}
+🟢 支撑: {support}
 📍 当前: {price_display} → {position_text}
 
 📋 操作参考
@@ -254,7 +271,6 @@ def generate_report():
 【做空】入场 {advice['short']['entry']} | 止损 {advice['short']['stop']} | 止盈 {advice['short']['tp1']}/{advice['short']['tp2']}
 
 📌 策略: 分批止盈 + 移动止损
-
 ⚠️ 仅供参考，风险自担
 """
     return report
@@ -270,7 +286,7 @@ def send_to_feishu(content):
         if resp.status_code == 200:
             print(f"[{get_beijing_time()}] ✅ 推送成功")
         else:
-            print(f"[{get_beijing_time()}] ❌ 推送失败")
+            print(f"[{get_beijing_time()}] ❌ 推送失败: {resp.text}")
     except Exception as e:
         print(f"[{get_beijing_time()}] ❌ 异常: {e}")
 
