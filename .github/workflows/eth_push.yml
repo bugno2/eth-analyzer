@@ -2,7 +2,7 @@ name: ETH AI 分析推送
 
 on:
   schedule:
-    - cron: '*/3 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
