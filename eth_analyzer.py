@@ -43,7 +43,6 @@ def get_date_str():
 # ========== 1. 基础数据获取 ==========
 
 def get_eth_price():
-    """获取ETH实时价格"""
     urls = [
         "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT",
         "https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT"
@@ -61,7 +60,6 @@ def get_eth_price():
 
 
 def get_detailed_klines():
-    """获取完整K线数据（含MA排列、RSI）"""
     try:
         url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=100"
         resp = requests.get(url, timeout=8)
@@ -72,16 +70,13 @@ def get_detailed_klines():
             lows = [float(c[3]) for c in data]
             volumes = [float(c[5]) for c in data]
             
-            # 均线
             ma7 = sum(closes[-7:]) / 7 if len(closes) >= 7 else closes[-1]
             ma25 = sum(closes[-25:]) / 25 if len(closes) >= 25 else closes[-1]
             ma99 = sum(closes[-99:]) / 99 if len(closes) >= 99 else closes[-1]
             
-            # RSI(14)
             rsi = 50
             if len(closes) >= 15:
-                gains = []
-                losses = []
+                gains, losses = [], []
                 for i in range(1, 15):
                     diff = closes[-i] - closes[-i-1]
                     if diff >= 0:
@@ -99,7 +94,6 @@ def get_detailed_klines():
                     rsi = 100 - (100 / (1 + rs))
             rsi = round(rsi, 1)
             
-            # 均线排列
             if ma7 > ma25 > ma99:
                 ma_arrangement = "多头排列 📈（MA7>MA25>MA99）"
             elif ma7 < ma25 < ma99:
@@ -107,7 +101,6 @@ def get_detailed_klines():
             else:
                 ma_arrangement = "均线交叉 ⚡（方向不明）"
             
-            # ATR
             tr_values = []
             for i in range(1, len(data)):
                 high = float(data[i][2])
@@ -134,7 +127,6 @@ def get_detailed_klines():
 
 
 def get_daily_levels():
-    """获取日线级关键位（含昨日同期对比）"""
     try:
         url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&limit=30"
         resp = requests.get(url, timeout=8)
@@ -181,19 +173,16 @@ def get_daily_levels():
     return None
 
 
-# ========== 2. 高级数据获取（原始API） ==========
+# ========== 2. 高级数据获取 ==========
 
 def get_funding_rate():
-    """获取资金费率（币安合约API）"""
     try:
         url = "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=ETHUSDT"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
             rate = float(data.get("lastFundingRate", 0))
-            next_time = data.get("nextFundingTime", 0)
-            # 计算年化
-            annualized = rate * 3 * 365 * 100  # 8小时结算一次
+            annualized = rate * 3 * 365 * 100
             if annualized > 50:
                 level = "🔥 多头过热，注意回调风险"
             elif annualized > 20:
@@ -208,7 +197,7 @@ def get_funding_rate():
                 "rate": round(rate * 100, 4),
                 "annualized": round(annualized, 2),
                 "level": level,
-                "next_time": datetime.fromtimestamp(next_time/1000, BEIJING_TZ).strftime("%H:%M")
+                "next_time": datetime.fromtimestamp(data.get("nextFundingTime", 0)/1000, BEIJING_TZ).strftime("%H:%M") if data.get("nextFundingTime") else "--"
             }
     except:
         pass
@@ -216,9 +205,7 @@ def get_funding_rate():
 
 
 def get_option_data():
-    """获取期权数据（币安期权API）"""
     try:
-        # 获取ETH期权持仓量（最近到期）
         url = "https://eapi.binance.com/eapi/v1/openInterest?underlyingAsset=ETH"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
@@ -226,18 +213,15 @@ def get_option_data():
             total_oi = 0
             for item in data:
                 total_oi += float(item.get("sumOpenInterest", 0))
-            total_oi = total_oi / 1_000_000  # 转换为百万
+            total_oi = total_oi / 1_000_000
             return {"oi": round(total_oi, 2), "source": "币安期权"}
     except:
         pass
-    # 备用：用模拟数据
     return {"oi": 85.2, "source": "模拟数据"}
 
 
 def get_implied_volatility():
-    """获取隐含波动率（从期权标记价格推算）"""
     try:
-        # 用近月ATM期权推算IV
         url = "https://eapi.binance.com/eapi/v1/markPrice?underlyingAsset=ETH"
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
@@ -264,7 +248,6 @@ def get_implied_volatility():
 
 
 def get_open_interest():
-    """获取合约持仓量（币安合约API）"""
     try:
         url = "https://fapi.binance.com/fapi/v1/openInterest?symbol=ETHUSDT"
         resp = requests.get(url, timeout=8)
@@ -276,10 +259,9 @@ def get_open_interest():
     return 0
 
 
-# ========== 3. 链上/ETF/多空比（外部API） ==========
+# ========== 3. 链上/ETF/多空比 ==========
 
 def get_chain_data():
-    """获取链上数据"""
     result = {
         "gas_price": "15 Gwei",
         "active_addresses": "420,000",
@@ -594,42 +576,46 @@ def generate_report():
     price = get_eth_price()
     price_display = f"${price:.2f}"
     
-    # 基础数据
     daily_levels = get_daily_levels()
     if daily_levels is None:
-        daily_levels = {"压力": price + 25, "强压": price + 40, "支撑": price - 25, "铁底": price - 40,
-                       "枢轴": price, "昨日高": price + 20, "昨日低": price - 20,
-                       "max_30": price + 50, "min_30": price - 50, "percentile_30": 50,
-                       "yesterday_same_time": price}
+        daily_levels = {
+            "压力": price + 25, "强压": price + 40,
+            "支撑": price - 25, "铁底": price - 40,
+            "枢轴": price, "昨日高": price + 20, "昨日低": price - 20,
+            "max_30": price + 50, "min_30": price - 50, "percentile_30": 50,
+            "yesterday_same_time": price
+        }
     
     hourly_levels = get_hourly_levels(price)
     if hourly_levels is None:
-        hourly_levels = {"压力": price + 8, "支撑": price - 8, "中轨": price, "atr": 10,
-                        "trend_4h": "📊 中性震荡",
-                        "long_entry": price - 5, "long_stop": price - 12,
-                        "long_tp1": price + 5, "long_tp2": price + 12,
-                        "short_entry": price + 5, "short_stop": price + 12,
-                        "short_tp1": price - 5, "short_tp2": price - 12}
+        hourly_levels = {
+            "压力": price + 8, "支撑": price - 8, "中轨": price, "atr": 10,
+            "trend_4h": "📊 中性震荡",
+            "long_entry": price - 5, "long_stop": price - 12,
+            "long_tp1": price + 5, "long_tp2": price + 12,
+            "short_entry": price + 5, "short_stop": price + 12,
+            "short_tp1": price - 5, "short_tp2": price - 12
+        }
     
     kline = get_detailed_klines()
     if kline is None:
-        kline = {"ma7": price, "ma25": price, "ma99": price, "ma_arrangement": "均线数据获取中",
-                "rsi": 50, "atr": 10, "volume": 0}
+        kline = {
+            "ma7": price, "ma25": price, "ma99": price,
+            "ma_arrangement": "均线数据获取中",
+            "rsi": 50, "atr": 10, "volume": 0
+        }
     
-    # 高级数据（原始API）
     funding = get_funding_rate()
     option = get_option_data()
     iv = get_implied_volatility()
     oi = get_open_interest()
     
-    # 外部数据
     chain = get_chain_data()
     etf = get_etf_data()
     lsr = get_long_short_ratio()
     fng = get_fear_greed_index()
     events = get_upcoming_events()
     
-    # 情绪分析
     token = get_baidu_access_token()
     news_list = fetch_eth_news()
     analysis_results = []
@@ -651,13 +637,11 @@ def generate_report():
     else:
         sentiment_text = "中性"
     
-    # 计算衍生指标
     percentile = daily_levels.get("percentile_30", 50)
     sr_score = calculate_support_resistance_score(price, daily_levels, hourly_levels)
     risk_level = calculate_risk_level(price, daily_levels, fng, percentile)
     comprehensive_advice = generate_comprehensive_advice(price, daily_levels, fng, sentiment_text)
     
-    # 昨日回顾
     yesterday_price = daily_levels.get("yesterday_same_time", price)
     price_change = price - yesterday_price
     price_change_pct = (price_change / yesterday_price) * 100 if yesterday_price > 0 else 0
@@ -668,7 +652,6 @@ def generate_report():
     else:
         yesterday_review = f"📉 较昨日同期下跌 {abs(price_change_pct):.1f}%（-${abs(price_change):.2f}）"
     
-    # 价格位置
     if price >= daily_levels["压力"]:
         position_text = "🔴 日线压力区，注意回调"
     elif price <= daily_levels["支撑"]:
@@ -676,7 +659,6 @@ def generate_report():
     else:
         position_text = "🟡 区间震荡，等待方向"
     
-    # 今日关注
     focus_points = []
     if price - daily_levels["支撑"] < 10:
         focus_points.append(f"📍 关注 {daily_levels['支撑']} 支撑是否有效")
@@ -690,7 +672,6 @@ def generate_report():
         focus_points.append("📍 区间震荡，等待方向明确")
     focus_text = "\n".join(focus_points[:3])
     
-    # 摘要
     if price < daily_levels["支撑"]:
         summary = "📌 价格已跌破日线支撑，建议观望或轻仓试多"
     elif price > daily_levels["压力"]:
@@ -702,7 +683,6 @@ def generate_report():
     else:
         summary = "📌 震荡行情，建议高抛低吸"
     
-    # 事件
     event_text = ""
     if events:
         event_list = []
@@ -715,7 +695,6 @@ def generate_report():
     
     fng_label = fng.get("label", "中性")
     
-    # 构建报告
     report = f"""
 📊 ETH 智能分析简报
 ⏰ {now}
@@ -747,7 +726,7 @@ def generate_report():
 【做多】入场 {hourly_levels['long_entry']} | 止损 {hourly_levels['long_stop']} | 止盈 {hourly_levels['long_tp1']}/{hourly_levels['long_tp2']}
 【做空】入场 {hourly_levels['short_entry']} | 止损 {hourly_levels['short_stop']} | 止盈 {hourly_levels['short_tp1']}/{hourly_levels['short_tp2']}
 
-📊 市场微观结构（原始API）
+📊 市场微观结构
 ⚡ 资金费率: {funding['rate']}%（年化 {funding['annualized']}%）| {funding['level']}
 📊 合约持仓量: {oi:.2f}M ETH
 📊 期权持仓量: {option['oi']:.2f}M ETH
@@ -757,4 +736,31 @@ def generate_report():
 ⛽ Gas: {chain['gas_price']}  👤 活跃地址: {chain['active_addresses']}  🏦 交易所流向: {chain['exchange_flow']}
 
 📊 ETF数据
-💰 净流入: {etf['net_flow']
+💰 净流入: {etf['net_flow']}  📈 趋势: {etf['trend']}
+
+📊 多空比: {lsr['ratio']}（{lsr['interpretation']}）
+⚠️ 风险等级: {risk_level}
+
+📅 近期事件: {event_text.replace(chr(10), ' | ')}
+
+🔍 今日关注
+{focus_text}
+
+📌 策略: 分批止盈 + 移动止损 | 版本: {VERSION}
+⚠️ 以上分析基于公开数据，不构成投资建议，交易风险自负
+"""
+    return report
+
+
+def main():
+    print(f"[{get_beijing_time()}] 🚀 开始分析...")
+    report = generate_report()
+    success = send_to_feishu_with_retry(report, max_retries=3)
+    if success:
+        print(f"[{get_beijing_time()}] ✅ 任务完成")
+    else:
+        print(f"[{get_beijing_time()}] ❌ 任务完成但推送失败")
+
+
+if __name__ == "__main__":
+    main()
