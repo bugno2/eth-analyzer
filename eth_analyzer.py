@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# eth_analyzer.py - ETH智能分析简报 (完整修复版 v4.3)
+# crypto_analyzer.py - BTC/ETH 智能分析简报 (双币版 v5.0)
 
 import requests
 import json
@@ -10,12 +10,10 @@ from datetime import datetime, timezone, timedelta
 
 # ========== 环境变量 ==========
 FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK")
-BAIDU_API_KEY = os.environ.get("BAIDU_API_KEY")
-BAIDU_SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY")
 # =============================
 
 BEIJING_TZ = timezone(timedelta(hours=8))
-VERSION = "v4.3"
+VERSION = "v5.0"
 
 
 def get_beijing_time():
@@ -24,11 +22,11 @@ def get_beijing_time():
 
 # ========== 1. 价格获取 ==========
 
-def get_eth_price():
-    """获取ETH实时价格 - 多数据源"""
+def get_price(symbol):
+    """获取币种实时价格"""
     # 方案1: 币安价格API
     try:
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}USDT"
         resp = requests.get(url, timeout=5)
         if resp.status_code == 200:
             price = float(resp.json().get("price", 0))
@@ -37,9 +35,9 @@ def get_eth_price():
     except:
         pass
     
-    # 方案2: 币安K线（最新收盘价）
+    # 方案2: 币安K线
     try:
-        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1m&limit=2"
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval=1m&limit=2"
         resp = requests.get(url, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
@@ -50,26 +48,15 @@ def get_eth_price():
     except:
         pass
     
-    # 方案3: MEXC
-    try:
-        url = "https://api.mexc.com/api/v3/ticker/price?symbol=ETHUSDT"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            price = float(resp.json().get("price", 0))
-            if price > 0:
-                return price
-    except:
-        pass
-    
     return None
 
 
 # ========== 2. 从K线计算微观结构数据 ==========
 
-def get_kline_data():
+def get_kline_data(symbol):
     """获取K线数据"""
     try:
-        url = "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=24"
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval=1h&limit=24"
         resp = requests.get(url, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
@@ -84,17 +71,16 @@ def get_kline_data():
     return None
 
 
-def calc_funding_rate_from_klines(price):
+def calc_funding_rate(symbol, price):
     """从K线计算资金费率"""
-    kline = get_kline_data()
+    kline = get_kline_data(symbol)
     if not kline or len(kline["closes"]) < 8:
-        # 基于价格估算
-        if price > 2000:
-            return "📈 多头偏强（正费率）"
-        elif price > 1800:
-            return "⚖️ 中性费率"
+        if price > 50000:
+            return "⚖️ 中性费率（推测）"
+        elif price > 2000:
+            return "⚖️ 中性费率（推测）"
         else:
-            return "📉 空头占优（负费率）"
+            return "⚖️ 中性费率（推测）"
     
     closes = kline["closes"]
     change_1h = (closes[-1] - closes[-2]) / closes[-2] * 100 if len(closes) >= 2 else 0
@@ -115,35 +101,42 @@ def calc_funding_rate_from_klines(price):
         return "⚖️ 中性费率"
 
 
-def calc_open_interest_from_klines():
+def calc_open_interest(symbol):
     """从成交量估算持仓量"""
-    kline = get_kline_data()
+    kline = get_kline_data(symbol)
     if not kline or not kline["volumes"]:
-        return "约 2.50M ETH"
+        if "BTC" in symbol:
+            return "约 25.0M USD"
+        else:
+            return "约 2.50M ETH"
     
-    total_volume = sum(kline["volumes"]) / 1_000_000
-    estimated_oi = total_volume * 0.28
-    estimated_oi = max(0.5, min(8, estimated_oi))
-    return f"约 {estimated_oi:.2f}M ETH"
+    total_volume = sum(kline["volumes"])
+    if "BTC" in symbol:
+        estimated_oi = total_volume * 0.15 / 1_000_000
+        estimated_oi = max(5, min(50, estimated_oi))
+        return f"约 {estimated_oi:.1f}M USD"
+    else:
+        estimated_oi = total_volume * 0.28 / 1_000_000
+        estimated_oi = max(0.5, min(8, estimated_oi))
+        return f"约 {estimated_oi:.2f}M ETH"
 
 
-def calc_option_oi_from_klines():
-    """从合约持仓量估算期权持仓量"""
-    oi = calc_open_interest_from_klines()
-    try:
-        val = float(oi.split(" ")[1].replace("M", ""))
-        option_oi = val * 0.45
-        option_oi = max(0.2, min(4, option_oi))
-        return f"约 {option_oi:.2f}M ETH"
-    except:
-        return "约 1.12M ETH"
+def calc_option_oi(symbol):
+    """估算期权持仓量"""
+    if "BTC" in symbol:
+        return "约 12.0M USD（估算）"
+    else:
+        return "约 1.12M ETH（估算）"
 
 
-def calc_iv_from_klines():
+def calc_iv(symbol):
     """从K线计算隐含波动率"""
-    kline = get_kline_data()
+    kline = get_kline_data(symbol)
     if not kline or len(kline["highs"]) < 24:
-        return "约 45.0%（🟢 正常）"
+        if "BTC" in symbol:
+            return "约 48.0%（🟢 正常）"
+        else:
+            return "约 45.0%（🟢 正常）"
     
     high = max(kline["highs"])
     low = min(kline["lows"])
@@ -163,9 +156,9 @@ def calc_iv_from_klines():
     return f"约 {annualized:.1f}%（{level}）"
 
 
-def calc_price_momentum():
+def calc_price_momentum(symbol):
     """计算价格动量"""
-    kline = get_kline_data()
+    kline = get_kline_data(symbol)
     if not kline or len(kline["closes"]) < 2:
         return "📊 区间震荡"
     
@@ -185,9 +178,9 @@ def calc_price_momentum():
         return "📊 区间震荡"
 
 
-def calc_volume_analysis():
+def calc_volume_analysis(symbol):
     """成交量分析"""
-    kline = get_kline_data()
+    kline = get_kline_data(symbol)
     if not kline or not kline["volumes"]:
         return "📊 成交量正常"
     
@@ -207,9 +200,22 @@ def calc_volume_analysis():
 
 # ========== 3. 核心计算 ==========
 
-def generate_levels(price):
+def generate_levels(price, symbol):
     """基于当前价格生成关键位"""
-    range_val = 15
+    if "BTC" in symbol:
+        # BTC波动大，范围设大一些
+        if price > 60000:
+            range_val = 800
+        elif price > 50000:
+            range_val = 600
+        elif price > 40000:
+            range_val = 500
+        else:
+            range_val = 400
+    else:
+        # ETH波动相对小
+        range_val = 15
+    
     return {
         "压力": round(price + range_val, 0),
         "强压": round(price + int(range_val * 1.8), 0),
@@ -219,7 +225,7 @@ def generate_levels(price):
     }
 
 
-def generate_trade_plan(price, levels):
+def generate_trade_plan(price, levels, symbol):
     """生成交易计划"""
     range_val = levels["range_val"]
     
@@ -302,38 +308,36 @@ def send_to_feishu(content):
     return False
 
 
-# ========== 6. 报告生成 ==========
+# ========== 6. 单币种报告生成 ==========
 
-def generate_report():
+def generate_single_report(symbol, display_name):
+    """生成单个币种的分析报告"""
     now = get_beijing_time()
     
-    price = get_eth_price()
+    price = get_price(symbol)
     if not price or price <= 0:
-        error_report = f"""
-📊 ETH 智能分析简报
+        return f"""
+📊 {display_name} 智能分析简报
 ⏰ {now}
 💰 价格: ❌ 数据获取失败
 
-⚠️ 无法获取ETH实时价格，请稍后再试。
-
-📌 {VERSION} | 仅供参考
+⚠️ 无法获取{display_name}实时价格，请稍后再试。
 """
-        return error_report
     
     price = round(price, 0)
-    
-    # 生成数据
-    levels = generate_levels(price)
-    plan = generate_trade_plan(price, levels)
     fng = get_fng()
     
-    # 微观结构数据（从K线计算）
-    funding = calc_funding_rate_from_klines(price)
-    oi = calc_open_interest_from_klines()
-    option_oi = calc_option_oi_from_klines()
-    iv = calc_iv_from_klines()
-    momentum = calc_price_momentum()
-    volume = calc_volume_analysis()
+    # 生成数据
+    levels = generate_levels(price, symbol)
+    plan = generate_trade_plan(price, levels, symbol)
+    
+    # 微观结构数据
+    funding = calc_funding_rate(symbol, price)
+    oi = calc_open_interest(symbol)
+    option_oi = calc_option_oi(symbol)
+    iv = calc_iv(symbol)
+    momentum = calc_price_momentum(symbol)
+    volume = calc_volume_analysis(symbol)
     
     # 评分
     s_score = "强支撑" if price - levels["支撑"] < 3 else "中等支撑" if price - levels["支撑"] < 8 else "弱支撑"
@@ -388,9 +392,9 @@ def generate_report():
     range_display = f"日内区间: ${levels['支撑']} - ${levels['压力']}（{levels['range_val']}点）"
     
     report = f"""
-📊 ETH 智能分析简报
+📊 {display_name} 智能分析简报
 ⏰ {now}
-💰 价格: ${price}
+💰 价格: ${price:,}
 📊 {range_display}
 
 📌 {summary}
@@ -399,13 +403,13 @@ def generate_report():
 📰 情绪: 中性 | 恐惧贪婪: {fng['value']}（{fng['label']}）
 
 📈 关键位
-🔴 压力: {levels['压力']}（{r_score}）
-🟢 支撑: {levels['支撑']}（{s_score}）
-🔴 强压: {levels['强压']} | 🟢 铁底: {levels['铁底']}
+🔴 压力: {levels['压力']:,}（{r_score}）
+🟢 支撑: {levels['支撑']:,}（{s_score}）
+🔴 强压: {levels['强压']:,} | 🟢 铁底: {levels['铁底']:,}
 
 📋 操作参考
-【做多】入场 {plan['long_entry']} | 止损 {plan['long_stop']} | 止盈 {plan['long_tp1']}/{plan['long_tp2']}
-【做空】入场 {plan['short_entry']} | 止损 {plan['short_stop']} | 止盈 {plan['short_tp1']}/{plan['short_tp2']}
+【做多】入场 {plan['long_entry']:,} | 止损 {plan['long_stop']:,} | 止盈 {plan['long_tp1']:,}/{plan['long_tp2']:,}
+【做空】入场 {plan['short_entry']:,} | 止损 {plan['short_stop']:,} | 止盈 {plan['short_tp1']:,}/{plan['short_tp2']:,}
 
 📊 市场微观结构
 ⚡ 资金费率: {funding}
@@ -415,8 +419,6 @@ def generate_report():
 📊 价格动量: {momentum}
 📊 成交量: {volume}
 
-📊 市场数据
-⚡ 波动幅度: {levels['range_val']}点
 ⚠️ 风险等级: {risk}
 
 🔍 今日关注
@@ -427,13 +429,33 @@ def generate_report():
     return report
 
 
+# ========== 7. 主函数 ==========
+
 def main():
     print(f"[{get_beijing_time()}] 🚀 开始分析...")
-    report = generate_report()
-    if send_to_feishu(report):
-        print(f"[{get_beijing_time()}] ✅ 推送成功")
+    
+    # 生成BTC报告
+    print(f"[{get_beijing_time()}] 📊 生成BTC报告...")
+    btc_report = generate_single_report("BTC", "BTC")
+    
+    # 生成ETH报告
+    print(f"[{get_beijing_time()}] 📊 生成ETH报告...")
+    eth_report = generate_single_report("ETH", "ETH")
+    
+    # 推送BTC报告
+    print(f"[{get_beijing_time()}] 📤 推送BTC报告...")
+    success_btc = send_to_feishu(btc_report)
+    
+    # 推送ETH报告
+    print(f"[{get_beijing_time()}] 📤 推送ETH报告...")
+    success_eth = send_to_feishu(eth_report)
+    
+    if success_btc and success_eth:
+        print(f"[{get_beijing_time()}] ✅ 全部推送成功")
+    elif success_btc or success_eth:
+        print(f"[{get_beijing_time()}] ⚠️ 部分推送成功")
     else:
-        print(f"[{get_beijing_time()}] ❌ 推送失败")
+        print(f"[{get_beijing_time()}] ❌ 全部推送失败")
 
 
 if __name__ == "__main__":
